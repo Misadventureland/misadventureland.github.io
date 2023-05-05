@@ -1,39 +1,38 @@
-const poster = document.querySelector('#poster');
-const guessForm = document.querySelector('form');
-const guessInput = document.querySelector('#guess');
-const resultDiv = document.querySelector('#result');
-
-// Fetch a random movie poster when the page loads
-fetchRandomPoster();
-
-// Event listener for guess form submission
-guessForm.addEventListener('submit', e => {
-  e.preventDefault();
-  const guess = guessInput.value;
-  const movieTitle = poster.dataset.title;
-
-  if (guess.toLowerCase() === movieTitle.toLowerCase()) {
-    // Correct guess
-    resultDiv.innerHTML = '<img src="https://cdn-icons-png.flaticon.com/512/864/864833.png" alt="Green check mark">';
-  } else {
-    // Incorrect guess
-    resultDiv.innerHTML = 'Sorry, try again!';
-  }
+$(document).ready(function() {
+  // Event listener for the input form
+  $("#input-form").submit(function(event) {
+    event.preventDefault();
+    var userInput = $("#input-field").val();
+    $("#output").html("Loading...");
+    var url = "https://api.themoviedb.org/3/search/movie?api_key=7ae222abae7a3ddc86b2deb7e8542a4a&language=en-US&query=" + userInput;
+    $.getJSON(url, function(data) {
+      var results = data.results;
+      if (results.length > 0) {
+        var firstResult = results[0];
+        var title = firstResult.title;
+        var releaseDate = firstResult.release_date;
+        var posterPath = firstResult.poster_path;
+        var directorUrl = "https://api.themoviedb.org/3/movie/" + firstResult.id + "/credits?api_key=7ae222abae7a3ddc86b2deb7e8542a4a";
+        var director = "";
+        $.getJSON(directorUrl, function(data) {
+          var crew = data.crew;
+          for (var i = 0; i < crew.length; i++) {
+            if (crew[i].job === "Director") {
+              director = crew[i].name;
+              break;
+            }
+          }
+          $("#output").html("<img class='poster' src='https://image.tmdb.org/t/p/w500" + posterPath + "'><br>" + title + " (" + releaseDate.substring(0, 4) + ")<br>Directed by " + director);
+          $(".poster").css({
+            "border": "3px solid black",
+            "max-height": "400px"
+          });
+        });
+      } else {
+        $("#output").html("No results found. Please try again.");
+      }
+    }).fail(function() {
+      $("#output").html("Error loading data. Please try again.");
+    });
+  });
 });
-
-function fetchRandomPoster() {
-  const apiKey = '7ae222abae7a3ddc86b2deb7e8542a4a';
-  const apiUrl = `https://api.themoviedb.org/3/movie/popular?api_key=${apiKey}&language=en-US&page=1`;
-
-  fetch(apiUrl)
-    .then(response => response.json())
-    .then(data => {
-      const randomIndex = Math.floor(Math.random() * data.results.length);
-      const posterPath = data.results[randomIndex].poster_path;
-      const posterUrl = `https://image.tmdb.org/t/p/w500/${posterPath}`;
-      const movieTitle = data.results[randomIndex].title;
-      poster.src = posterUrl;
-      poster.dataset.title = movieTitle;
-    })
-    .catch(error => console.error(error));
-}
