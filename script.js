@@ -103,7 +103,6 @@ async function fetchSuggestions(query) {
     if (searchingActor) {
       const data = await tmdbFetch('/search/person', { query, language: 'en-US' });
       results = (data.results ?? [])
-        .filter(p => p.known_for_department === 'Acting')
         .slice(0, 6)
         .map(p => ({
           tmdbId:    p.id,
@@ -188,8 +187,7 @@ async function searchMovie(title) {
 
 async function searchPerson(name) {
   const data = await tmdbFetch('/search/person', { query: name, language: 'en-US' });
-  const actors = (data.results ?? []).filter(p => p.known_for_department === 'Acting');
-  return actors[0] ?? null;
+  return data.results?.[0] ?? null;
 }
 
 async function movieCast(movieId) {
