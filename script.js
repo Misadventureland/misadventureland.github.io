@@ -390,19 +390,31 @@ async function startGame() {
 // ============================================================
 async function shareInviteLink() {
   const url  = `${window.location.origin}${window.location.pathname}?room=${roomId}`;
-  const text = `Join my Movie Game! Room code: ${roomId}`;
+  const msg  = `I'm challenging you to a battle in The Movie Game! Room code: ${roomId}\n${url}`;
   const btn  = document.getElementById('shareBtn');
 
-  try {
-    if (navigator.share && navigator.canShare?.({ title: 'The Movie Game', text, url })) {
-      await navigator.share({ title: 'The Movie Game', text, url });
-    } else {
-      await navigator.clipboard.writeText(`${text}\n${url}`);
-      const orig = btn.textContent;
-      btn.textContent = '✓ Copied!';
-      setTimeout(() => { btn.textContent = orig; }, 2000);
+  // 1. Try native share sheet (works great on mobile)
+  if (navigator.share) {
+    try {
+      await navigator.share({ title: 'The Movie Game', text: `I'm challenging you to a battle in The Movie Game! Room code: ${roomId}`, url });
+      return;
+    } catch (e) {
+      if (e.name === 'AbortError') return; // user cancelled — do nothing
+      // otherwise fall through to clipboard
     }
-  } catch (_) { /* user cancelled */ }
+  }
+
+  // 2. Try clipboard API
+  try {
+    await navigator.clipboard.writeText(msg);
+    const orig = btn.textContent;
+    btn.textContent = '✓ Link copied!';
+    setTimeout(() => { btn.textContent = orig; }, 2500);
+    return;
+  } catch (_) { /* fall through */ }
+
+  // 3. Last resort — browser prompt so they can copy manually
+  window.prompt('Copy this invite link:', msg);
 }
 
 // ============================================================
