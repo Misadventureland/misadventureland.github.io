@@ -472,6 +472,7 @@
   </div>
 
   <button class="btn btn-gold" id="startBtn" disabled>Waiting for players&hellip;</button>
+  <button class="btn btn-outline" id="shareBtn" style="margin-top:10px;">📱 Share Invite Link</button>
 </div>
 
 <!-- ══ GAME ══════════════════════════════════════════ -->
@@ -489,6 +490,43 @@
 
   <div class="chain-box" id="chainBox">
     <div style="color:#333;font-size:.85rem;">The chain will appear here&hellip;</div>
+  </div>
+
+  <!-- ── Challenge UI ───────────────────────────────────────── -->
+
+  <!-- Challenge button — shown to any player who can issue a challenge -->
+  <div id="challengeAvailable" style="display:none; margin-bottom:14px; text-align:center;">
+    <button id="challengeBtn" class="btn btn-outline" style="font-size:0.82rem; padding:10px 16px;">
+      <span id="challengeBtnLabel">⚡ Challenge</span>
+    </button>
+    <p id="challengeBtnHint" style="font-size:0.7rem; color:#555; margin-top:6px;"></p>
+  </div>
+
+  <!-- Challenge response — shown to the player who is being challenged -->
+  <div id="challengeResponse" style="display:none; margin-bottom:14px;">
+    <div style="background:rgba(212,92,92,0.07);border:1px solid rgba(212,92,92,0.25);border-radius:5px;padding:14px 16px;margin-bottom:12px;">
+      <p style="font-size:0.65rem;letter-spacing:0.15em;text-transform:uppercase;color:#d45c5c;margin-bottom:6px;">⚡ You've been challenged!</p>
+      <p id="challengePrompt" style="font-size:0.9rem;color:#e0d8cc;line-height:1.6;"></p>
+    </div>
+    <div class="input-wrap">
+      <div class="input-row">
+        <input type="text" id="challengeInput" placeholder="Your answer&hellip;" autocomplete="off" spellcheck="false">
+        <button class="btn btn-gold" id="challengeSubmitBtn" style="width:auto;padding:11px 18px;">Submit</button>
+      </div>
+      <div class="suggestions" id="challengeSuggestions"></div>
+    </div>
+    <div class="feedback" id="challengeFeedback"></div>
+    <div style="text-align:center;margin-top:12px;">
+      <button id="challengeGiveUpBtn" style="background:none;border:none;color:#3a3a3a;font-size:0.72rem;letter-spacing:0.1em;cursor:pointer;font-family:inherit;text-transform:uppercase;" onmouseover="this.style.color='#d45c5c'" onmouseout="this.style.color='#3a3a3a'">Give up (take the letter)</button>
+    </div>
+  </div>
+
+  <!-- Challenge watching — shown to everyone else while challenge is active -->
+  <div id="challengeWatching" style="display:none; margin-bottom:14px;">
+    <div class="waiting-panel" style="padding:16px 0 8px;">
+      <div class="spinner"></div>
+      <p id="challengeWatchText" style="font-size:0.85rem;"></p>
+    </div>
   </div>
 
   <!-- My turn -->
