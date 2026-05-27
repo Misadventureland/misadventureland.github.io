@@ -42,12 +42,13 @@ if (!firebaseReady) {
 // ============================================================
 //  Local session state
 // ============================================================
-let me       = { id: null, name: null };  // this browser's player
-let roomId   = null;
-let roomRef  = null;
-let roomSnap = null;   // latest Firebase snapshot value
-let isHost   = false;
-let listener = null;   // Firebase 'value' listener handle
+let me                 = { id: null, name: null };  // this browser's player
+let roomId             = null;
+let roomRef            = null;
+let roomSnap           = null;   // latest Firebase snapshot value
+let isHost             = false;
+let listener           = null;   // Firebase 'value' listener handle
+let selectedSuggestion = null;   // TMDB item chosen from autocomplete dropdown
 
 // ============================================================
 //  Utilities
@@ -76,6 +77,96 @@ function setFeedback(msg, type = '') {
   const el = document.getElementById('feedback');
   el.textContent = msg;
   el.className = 'feedback ' + type;
+}
+
+function debounce(fn, ms) {
+  let timer;
+  return (...args) => { clearTimeout(timer); timer = setTimeout(() => fn(...args), ms); };
+}
+
+function tmdbImg(path, size = 'w92') {
+  return path ? `https://image.tmdb.org/t/p/${size}${path}` : null;
+}
+
+// ============================================================
+//  Autocomplete
+// ============================================================
+async function fetchSuggestions(query) {
+  if (query.length < 2) { clearSuggestions(); return; }
+
+  // Determine what we're searching for based on the current chain
+  const last          = roomSnap?.lastChainItem;
+  const searchingActor = last?.type === 'movie';
+
+  try {
+    let results;
+    if (searchingActor) {
+      const data = await tmdbFetch('/search/person', { query, language: 'en-US' });
+      results = (data.results ?? [])
+        .filter(p => p.known_for_department === 'Acting')
+        .slice(0, 6)
+        .map(p => ({
+          tmdbId:    p.id,
+          name:      p.name,
+          type:      'actor',
+          imagePath: p.profile_path ?? null,
+          sub:       (p.known_for ?? []).map(m => m.title || m.name).filter(Boolean).slice(0, 2).join(', ')
+        }));
+    } else {
+      const data = await tmdbFetch('/search/movie', { query, language: 'en-US' });
+      results = (data.results ?? [])
+        .slice(0, 6)
+        .map(m => ({
+          tmdbId:    m.id,
+          name:      m.title,
+          type:      'movie',
+          imagePath: m.poster_path ?? null,
+          sub:       m.release_date ? m.release_date.slice(0, 4) : ''
+        }));
+    }
+    renderSuggestions(results);
+  } catch (_) { /* silently ignore — user can still submit manually */ }
+}
+
+function renderSuggestions(results) {
+  const el = document.getElementById('suggestions');
+  if (!results.length) { clearSuggestions(); return; }
+
+  el.innerHTML = results.map(r => {
+    const img     = tmdbImg(r.imagePath);
+    const isActor = r.type === 'actor';
+    return `<div class="suggestion-item">
+      ${img
+        ? `<img class="suggestion-thumb ${isActor ? 'round' : ''}" src="${img}" alt="" loading="lazy">`
+        : `<div class="suggestion-thumb ${isActor ? 'round' : ''}"></div>`}
+      <div style="flex:1;min-width:0;">
+        <div class="suggestion-title">${r.name}</div>
+        ${r.sub ? `<div class="suggestion-sub">${r.sub}</div>` : ''}
+      </div>
+    </div>`;
+  }).join('');
+
+  // Attach click handlers (mousedown so it fires before input blur)
+  el.querySelectorAll('.suggestion-item').forEach((item, i) => {
+    item.addEventListener('mousedown', e => {
+      e.preventDefault();
+      selectSuggestion(results[i]);
+    });
+  });
+
+  el.classList.add('open');
+}
+
+function clearSuggestions() {
+  const el = document.getElementById('suggestions');
+  el.classList.remove('open');
+  el.innerHTML = '';
+}
+
+function selectSuggestion(item) {
+  selectedSuggestion = item;
+  document.getElementById('answerInput').value = item.name;
+  clearSuggestions();
 }
 
 // ============================================================
@@ -111,37 +202,60 @@ async function personFilmography(personId) {
   return data.cast ?? [];
 }
 
-// Returns { valid, name, tmdbId, type } or { valid: false, error }
-async function validateAnswer(input, lastItem, usedMovies, usedActors) {
+// Returns { valid, name, tmdbId, type, imagePath } or { valid: false, error }
+// preSelected is a suggestion item already chosen from the dropdown (skips the search step)
+async function validateAnswer(input, lastItem, usedMovies, usedActors, preSelected = null) {
   if (!lastItem) {
     // First move — just needs to be a real movie
-    const movie = await searchMovie(input);
+    const movie = preSelected
+      ? { id: preSelected.tmdbId, title: preSelected.name, poster_path: preSelected.imagePath }
+      : await searchMovie(input);
     if (!movie) return { valid: false, error: `Can't find a movie called "${input}"` };
     if (usedMovies?.[movie.id]) return { valid: false, error: `"${movie.title}" was already used` };
-    return { valid: true, name: movie.title, tmdbId: movie.id, type: 'movie' };
+    return { valid: true, name: movie.title, tmdbId: movie.id, type: 'movie', imagePath: movie.poster_path ?? null };
   }
 
   if (lastItem.type === 'movie') {
     // Player must name an actor who was in lastItem (a movie)
-    const person = await searchPerson(input);
-    if (!person) return { valid: false, error: `Can't find an actor named "${input}"` };
-    if (usedActors?.[person.id]) return { valid: false, error: `${person.name} was already used` };
-    const cast = await movieCast(lastItem.tmdbId);
-    if (!cast.some(c => c.id === person.id)) {
-      return { valid: false, error: `${person.name} wasn't in "${lastItem.name}"` };
+    let personId, personName, imagePath;
+    if (preSelected) {
+      personId   = preSelected.tmdbId;
+      personName = preSelected.name;
+      imagePath  = preSelected.imagePath;
+    } else {
+      const person = await searchPerson(input);
+      if (!person) return { valid: false, error: `Can't find an actor named "${input}"` };
+      personId   = person.id;
+      personName = person.name;
+      imagePath  = person.profile_path ?? null;
     }
-    return { valid: true, name: person.name, tmdbId: person.id, type: 'actor' };
+    if (usedActors?.[personId]) return { valid: false, error: `${personName} was already used` };
+    const cast = await movieCast(lastItem.tmdbId);
+    if (!cast.some(c => c.id === personId)) {
+      return { valid: false, error: `${personName} wasn't in "${lastItem.name}"` };
+    }
+    return { valid: true, name: personName, tmdbId: personId, type: 'actor', imagePath };
 
   } else {
     // Player must name a movie that lastItem (an actor) appeared in
-    const movie = await searchMovie(input);
-    if (!movie) return { valid: false, error: `Can't find a movie called "${input}"` };
-    if (usedMovies?.[movie.id]) return { valid: false, error: `"${movie.title}" was already used` };
-    const films = await personFilmography(lastItem.tmdbId);
-    if (!films.some(m => m.id === movie.id)) {
-      return { valid: false, error: `${lastItem.name} wasn't in "${movie.title}"` };
+    let movieId, movieTitle, imagePath;
+    if (preSelected) {
+      movieId    = preSelected.tmdbId;
+      movieTitle = preSelected.name;
+      imagePath  = preSelected.imagePath;
+    } else {
+      const movie = await searchMovie(input);
+      if (!movie) return { valid: false, error: `Can't find a movie called "${input}"` };
+      movieId    = movie.id;
+      movieTitle = movie.title;
+      imagePath  = movie.poster_path ?? null;
     }
-    return { valid: true, name: movie.title, tmdbId: movie.id, type: 'movie' };
+    if (usedMovies?.[movieId]) return { valid: false, error: `"${movieTitle}" was already used` };
+    const films = await personFilmography(lastItem.tmdbId);
+    if (!films.some(m => m.id === movieId)) {
+      return { valid: false, error: `${lastItem.name} wasn't in "${movieTitle}"` };
+    }
+    return { valid: true, name: movieTitle, tmdbId: movieId, type: 'movie', imagePath };
   }
 }
 
@@ -333,9 +447,16 @@ function renderChain() {
   const recent = entries.slice(-5);
   el.innerHTML = recent.map((item, i) => {
     const isCurrent = i === recent.length - 1;
+    const isActor   = item.type === 'actor';
+    const imgUrl    = item.imagePath ? tmdbImg(item.imagePath) : null;
     return `<div class="chain-item ${isCurrent ? 'current' : ''}">
-      <div class="chain-item-label">${item.type === 'movie' ? '🎬 Movie' : '⭐ Actor'}</div>
-      <div class="chain-item-name">${item.name}</div>
+      ${imgUrl
+        ? `<img class="chain-thumb ${isActor ? 'round' : ''}" src="${imgUrl}" alt="${item.name}" loading="lazy">`
+        : `<div class="chain-thumb ${isActor ? 'round' : ''}"></div>`}
+      <div class="chain-item-text">
+        <div class="chain-item-label">${isActor ? '⭐ Actor' : '🎬 Movie'}</div>
+        <div class="chain-item-name">${item.name}</div>
+      </div>
     </div>`;
   }).join('');
 }
@@ -396,12 +517,17 @@ async function handleSubmit() {
   setFeedback('Checking…', '');
   input.value = '';
 
+  const pickedSuggestion = selectedSuggestion;
+  selectedSuggestion = null;
+  clearSuggestions();
+
   try {
     const result = await validateAnswer(
       answer,
       roomSnap.lastChainItem,
       roomSnap.usedMovies,
-      roomSnap.usedActors
+      roomSnap.usedActors,
+      pickedSuggestion
     );
 
     if (result.valid) {
@@ -430,9 +556,11 @@ async function advanceChain(result) {
   const logKey = roomRef.child('log').push().key;  // generate unique ordered key
   const nextIdx = nextActiveIndex(roomSnap.currentIdx, roomSnap.players);
 
+  const logEntry = { type: result.type, name: result.name, tmdbId: result.tmdbId, imagePath: result.imagePath ?? null };
+
   await roomRef.update({
-    [`log/${logKey}`]: { type: result.type, name: result.name, tmdbId: result.tmdbId },
-    lastChainItem:    { type: result.type, name: result.name, tmdbId: result.tmdbId },
+    [`log/${logKey}`]: logEntry,
+    lastChainItem:    logEntry,
     usedMovies,
     usedActors,
     currentAttempts: 0,
@@ -442,20 +570,22 @@ async function advanceChain(result) {
 
 async function handleFailure() {
   const attempts = (roomSnap.currentAttempts ?? 0) + 1;
-
   if (attempts < 3) {
     await roomRef.update({ currentAttempts: attempts });
     return;
   }
+  await assignLetterAndPass();
+}
 
-  // Used all 3 tries — earn a letter
+// Give this player a letter and move to the next player.
+// Used by both "used all 3 attempts" and "give up turn".
+async function assignLetterAndPass() {
   const myLetters  = roomSnap.players?.[me.id]?.letters ?? '';
   const newLetters = myLetters + WORD[myLetters.length];
   const isOut      = newLetters.length >= WORD.length;
 
   const order = toArray(roomSnap.playerOrder);
 
-  // Build updated players map to figure out who's still active
   const updatedPlayers = {
     ...roomSnap.players,
     [me.id]: { ...roomSnap.players[me.id], letters: newLetters, out: isOut }
@@ -477,6 +607,43 @@ async function handleFailure() {
   }
 
   await roomRef.update(updates);
+}
+
+// Completely remove this player from the game (eliminated immediately).
+async function leaveGame() {
+  if (!roomSnap || !roomRef) { showScreen('screen-landing'); return; }
+
+  const order   = toArray(roomSnap.playerOrder);
+  const players = roomSnap.players ?? {};
+
+  // Mark as out with full MOVIE letters
+  const updates = {
+    [`players/${me.id}/out`]:     true,
+    [`players/${me.id}/letters`]: WORD,
+    currentAttempts: 0
+  };
+
+  const stillIn = order.filter(pid => pid !== me.id && !players[pid]?.out);
+
+  if (stillIn.length <= 1) {
+    updates.status = 'finished';
+    updates.winner = stillIn[0] ?? null;
+  } else {
+    // If it was my turn, advance to next
+    const curPid = order[roomSnap.currentIdx];
+    if (curPid === me.id) {
+      const updatedPlayers = { ...players, [me.id]: { ...players[me.id], out: true } };
+      updates.currentIdx = nextActiveIndex(roomSnap.currentIdx, updatedPlayers);
+    }
+  }
+
+  await roomRef.update(updates);
+
+  // Detach listener and go back to landing
+  if (listener) roomRef.off('value', listener);
+  listener = null;
+  roomSnap = null;
+  showScreen('screen-landing');
 }
 
 // Find the index of the next player who hasn't been eliminated
@@ -516,12 +683,16 @@ function renderGameOver() {
   const entries = Object.values(log);
   document.getElementById('chainLen').textContent = entries.length;
 
-  document.getElementById('finalChain').innerHTML = entries.map(item => `
-    <div class="chain-log-item">
-      <span class="icon">${item.type === 'movie' ? '🎬' : '⭐'}</span>
+  document.getElementById('finalChain').innerHTML = entries.map(item => {
+    const isActor = item.type === 'actor';
+    const imgUrl  = item.imagePath ? tmdbImg(item.imagePath) : null;
+    return `<div class="chain-log-item">
+      ${imgUrl
+        ? `<img class="chain-log-thumb ${isActor ? 'round' : ''}" src="${imgUrl}" alt="" loading="lazy">`
+        : `<span class="icon">${isActor ? '⭐' : '🎬'}</span>`}
       <span>${item.name}</span>
-    </div>
-  `).join('');
+    </div>`;
+  }).join('');
 }
 
 // ============================================================
@@ -566,6 +737,31 @@ document.getElementById('startBtn').addEventListener('click', startGame);
 document.getElementById('submitBtn').addEventListener('click', handleSubmit);
 document.getElementById('answerInput').addEventListener('keydown', e => {
   if (e.key === 'Enter') handleSubmit();
+  if (e.key === 'Escape') clearSuggestions();
+});
+
+const debouncedSearch = debounce(fetchSuggestions, 300);
+document.getElementById('answerInput').addEventListener('input', function () {
+  selectedSuggestion = null; // typing again clears any prior selection
+  debouncedSearch(this.value.trim());
+});
+
+// Close suggestions when clicking elsewhere
+document.addEventListener('click', e => {
+  if (!e.target.closest('.input-wrap')) clearSuggestions();
+});
+
+document.getElementById('giveUpBtn').addEventListener('click', async () => {
+  if (!roomSnap) return;
+  const order = toArray(roomSnap.playerOrder);
+  if (order[roomSnap.currentIdx] !== me.id) return; // not my turn
+  if (!confirm('Give up your turn? You\'ll receive a letter.')) return;
+  await assignLetterAndPass();
+});
+
+document.getElementById('leaveBtn').addEventListener('click', () => {
+  if (!confirm('Leave the game? You\'ll be eliminated.')) return;
+  leaveGame();
 });
 
 // Game over

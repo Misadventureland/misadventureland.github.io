@@ -216,9 +216,22 @@
       min-height: 56px;
     }
     .chain-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
       margin-bottom: 10px;
     }
     .chain-item:last-child { margin-bottom: 0; }
+    .chain-thumb {
+      width: 32px;
+      height: 48px;
+      object-fit: cover;
+      border-radius: 3px;
+      background: #1a1a26;
+      flex-shrink: 0;
+    }
+    .chain-thumb.round { height: 32px; border-radius: 50%; }
+    .chain-item-text { flex: 1; min-width: 0; }
     .chain-item-label {
       font-size: 0.62rem;
       letter-spacing: 0.12em;
@@ -226,12 +239,51 @@
       color: #444;
       margin-bottom: 2px;
     }
-    .chain-item-name { font-size: 0.85rem; color: #777; }
+    .chain-item-name { font-size: 0.85rem; color: #777; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .chain-item.current .chain-item-name {
       font-size: 1.05rem;
       color: #e0d8cc;
       font-weight: bold;
     }
+
+    /* Autocomplete */
+    .input-wrap { position: relative; }
+    .suggestions {
+      position: absolute;
+      top: 100%;
+      left: 0; right: 0;
+      background: #13131e;
+      border: 1px solid rgba(201,162,39,0.35);
+      border-top: none;
+      border-radius: 0 0 6px 6px;
+      z-index: 200;
+      display: none;
+      max-height: 300px;
+      overflow-y: auto;
+    }
+    .suggestions.open { display: block; }
+    .suggestion-item {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 9px 12px;
+      cursor: pointer;
+      border-bottom: 1px solid rgba(255,255,255,0.04);
+      transition: background 0.12s;
+    }
+    .suggestion-item:last-child { border-bottom: none; }
+    .suggestion-item:hover { background: rgba(201,162,39,0.1); }
+    .suggestion-thumb {
+      width: 34px;
+      height: 50px;
+      object-fit: cover;
+      border-radius: 3px;
+      background: #1a1a26;
+      flex-shrink: 0;
+    }
+    .suggestion-thumb.round { height: 34px; border-radius: 50%; }
+    .suggestion-title { font-size: 0.88rem; color: #e0d8cc; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .suggestion-sub { font-size: 0.7rem; color: #555; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
     /* Prompt */
     .prompt {
@@ -352,6 +404,15 @@
       gap: 10px;
     }
     .chain-log-item .icon { color: #444; font-size: 0.8rem; width: 16px; text-align: center; }
+    .chain-log-thumb {
+      width: 28px;
+      height: 42px;
+      object-fit: cover;
+      border-radius: 3px;
+      background: #1a1a26;
+      flex-shrink: 0;
+    }
+    .chain-log-thumb.round { height: 28px; border-radius: 50%; }
     .score-row {
       display: flex;
       justify-content: space-between;
@@ -420,7 +481,10 @@
       <div class="turn-label">Now playing</div>
       <div class="turn-name" id="turnName">&mdash;</div>
     </div>
-    <div class="room-tag">Room: <span id="gameCode"></span></div>
+    <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;">
+      <div class="room-tag">Room: <span id="gameCode"></span></div>
+      <button id="leaveBtn" style="background:none;border:none;color:#444;font-size:0.7rem;letter-spacing:0.1em;cursor:pointer;font-family:inherit;text-transform:uppercase;padding:0;">Leave game</button>
+    </div>
   </div>
 
   <div class="chain-box" id="chainBox">
@@ -435,11 +499,17 @@
       <div class="dot" id="d1"></div>
       <div class="dot" id="d2"></div>
     </div>
-    <div class="input-row">
-      <input type="text" id="answerInput" placeholder="Type your answer&hellip;" autocomplete="off" spellcheck="false">
-      <button class="btn btn-gold" id="submitBtn" style="width:auto;padding:11px 18px;">Submit</button>
+    <div class="input-wrap">
+      <div class="input-row">
+        <input type="text" id="answerInput" placeholder="Type your answer&hellip;" autocomplete="off" spellcheck="false">
+        <button class="btn btn-gold" id="submitBtn" style="width:auto;padding:11px 18px;">Submit</button>
+      </div>
+      <div class="suggestions" id="suggestions"></div>
     </div>
     <div class="feedback" id="feedback"></div>
+    <div style="text-align:center;margin-top:14px;">
+      <button id="giveUpBtn" style="background:none;border:none;color:#3a3a3a;font-size:0.72rem;letter-spacing:0.1em;cursor:pointer;font-family:inherit;text-transform:uppercase;padding:4px 8px;transition:color 0.2s;" onmouseover="this.style.color='#d45c5c'" onmouseout="this.style.color='#3a3a3a'">Give up turn (take a letter)</button>
+    </div>
   </div>
 
   <!-- Waiting for other player -->
