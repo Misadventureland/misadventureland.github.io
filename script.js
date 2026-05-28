@@ -1168,6 +1168,27 @@ async function handleRoundStartChoice(type) {
   await roomRef.update({ roundStartType: type });
 }
 
+async function leaveLobby() {
+  if (!roomRef) { showScreen('screen-landing'); return; }
+  const order    = toArray(roomSnap?.playerOrder ?? []);
+  const newOrder = order.filter(pid => pid !== me.id);
+
+  if (newOrder.length === 0) {
+    // Last person in the lobby — remove the room entirely
+    await roomRef.remove();
+  } else {
+    const updates = { [`players/${me.id}`]: null, playerOrder: newOrder };
+    if (isHost) updates.hostId = newOrder[0]; // hand host to next player
+    await roomRef.update(updates);
+  }
+
+  if (listener) roomRef.off('value', listener);
+  listener = null; roomSnap = null; roomId = null; roomRef = null; isHost = false;
+  chatAttached = false;
+  clearSession();
+  showScreen('screen-landing');
+}
+
 async function leaveGame() {
   if (!roomSnap || !roomRef) { showScreen('screen-landing'); return; }
   const order   = toArray(roomSnap.playerOrder);
@@ -1748,6 +1769,7 @@ document.getElementById('lobbyCode').addEventListener('click', function () {
 });
 document.getElementById('startBtn').addEventListener('click', startGame);
 document.getElementById('shareBtn').addEventListener('click', shareInviteLink);
+document.getElementById('leaveLobbyBtn').addEventListener('click', leaveLobby);
 
 // Main answer input + autocomplete
 document.getElementById('submitBtn').addEventListener('click', handleSubmit);
