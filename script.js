@@ -460,6 +460,11 @@ async function validateAnswer(input, lastItem, usedMovies, usedActors, preSelect
       personId = p.id; personName = p.name; imagePath = p.profile_path ?? null;
     }
     if (usedActors?.[personId]) return { valid: false, error: `${personName} was already used` };
+    // Ace check: the opening actor must have at least one unused movie others can follow with
+    const films = await personFilmography(personId);
+    if (films.filter(f => !usedMovies?.[f.id]).length === 0) {
+      return { valid: false, error: `${personName} has no available movies to follow — that's an ace. Try someone else` };
+    }
     return { valid: true, name: personName, tmdbId: personId, type: 'actor', imagePath };
   }
 
@@ -469,6 +474,11 @@ async function validateAnswer(input, lastItem, usedMovies, usedActors, preSelect
       : await searchMovie(input);
     if (!movie) return { valid: false, error: `Can't find a movie called "${input}"` };
     if (usedMovies?.[movie.id]) return { valid: false, error: `"${movie.title}" was already used` };
+    // Ace check: the opening movie must have at least one unused actor others can follow with
+    const cast = await movieCast(movie.id);
+    if (cast.filter(c => !usedActors?.[c.id]).length === 0) {
+      return { valid: false, error: `"${movie.title}" has no available actors to follow — that's an ace. Try a different movie` };
+    }
     return { valid: true, name: movie.title, tmdbId: movie.id, type: 'movie', imagePath: movie.poster_path ?? null };
   }
 
