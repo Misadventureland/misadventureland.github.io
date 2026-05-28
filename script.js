@@ -62,6 +62,70 @@ const TMDB_KEY  = '7ae222abae7a3ddc86b2deb7e8542a4a';
 const TMDB_BASE = 'https://api.themoviedb.org/3';
 const WORD      = 'MOVIE';
 
+// ── Winner quotes ─────────────────────────────────────────────
+const WINNER_QUOTES = [
+  {
+    text:   "If you ain't first, you're last.",
+    source: "Ricky Bobby · Talladega Nights: The Ballad of Ricky Bobby (2006)"
+  },
+  {
+    text:   "Two little mice fell in a bucket of cream. The first mouse quickly gave up and drowned. The second mouse wouldn't quit. He struggled so hard that eventually he churned that cream into butter and crawled out.",
+    source: "Frank Abagnale Sr. · Catch Me If You Can (2002)"
+  },
+  {
+    text:   "If hard work is the key to success, most people would rather pick the lock.",
+    source: "The Internship (2013)"
+  },
+  {
+    text:   "Goonies never say die.",
+    source: "Mikey · The Goonies (1985)"
+  },
+  {
+    text:   "Nobody is going to hit as hard as life, but it ain't how hard you can hit. It's how hard you can get hit and keep moving forward. That's how winning is done.",
+    source: "Rocky Balboa · Rocky Balboa (2006)"
+  },
+  {
+    text:   "I'm the best there is. I wake up in the morning and I piss excellence.",
+    source: "Ricky Bobby · Talladega Nights: The Ballad of Ricky Bobby (2006)"
+  },
+  {
+    text:   "You're the man now, dog.",
+    source: "William Forrester · Finding Forrester (2000)"
+  },
+  {
+    text:   "I'm kind of a big deal. People know me.",
+    source: "Ron Burgundy · Anchorman: The Legend of Ron Burgundy (2004)"
+  },
+  {
+    text:   "I'm the king of the world!",
+    source: "Jack Dawson · Titanic (1997)"
+  },
+  {
+    text:   "Get busy living, or get busy dying.",
+    source: "Ellis 'Red' Redding · The Shawshank Redemption (1994)"
+  },
+  {
+    text:   "Every man dies, not every man really lives.",
+    source: "William Wallace · Braveheart (1995)"
+  },
+  {
+    text:   "Show me the money!",
+    source: "Rod Tidwell · Jerry Maguire (1996)"
+  },
+  {
+    text:   "You've got to ask yourself one question: 'Do I feel lucky?' Well, do ya, punk?",
+    source: "Harry Callahan · Dirty Harry (1971)"
+  },
+  {
+    text:   "Roads? Where we're going we don't need roads.",
+    source: "Dr. Emmett Brown · Back to the Future (1985)"
+  },
+  {
+    text:   "To infinity and beyond!",
+    source: "Buzz Lightyear · Toy Story (1995)"
+  },
+];
+
 // ============================================================
 //  Firebase init
 // ============================================================
@@ -1301,6 +1365,17 @@ function renderGameOver() {
   finalChainEl.querySelectorAll('.chain-log-thumb.round[data-fullimg]').forEach(img => {
     img.addEventListener('click', () => openLightbox(img.dataset.fullimg, img.dataset.name));
   });
+
+  // Pick one random winner quote for this game
+  const q = WINNER_QUOTES[Math.floor(Math.random() * WINNER_QUOTES.length)];
+  const quoteEl  = document.getElementById('winnerQuote');
+  const quoteText = document.getElementById('winnerQuoteText');
+  const quoteSrc  = document.getElementById('winnerQuoteSource');
+  if (quoteEl && quoteText && quoteSrc) {
+    quoteText.textContent = `“${q.text}”`;   // "…"
+    quoteSrc.textContent  = `— ${q.source}`;      // — Source
+    quoteEl.style.display = 'block';
+  }
 }
 
 // ============================================================

@@ -793,11 +793,68 @@
   <h1>The Movie Game</h1>
   <p class="subtitle">Game Over</p>
 
-  <div class="card" style="text-align:center;">
-    <p style="font-size:.6rem;font-weight:600;letter-spacing:.22em;text-transform:uppercase;color:#4a4a4a;">Winner</p>
-    <p class="winner-name" id="winnerName">&mdash;</p>
-    <p style="font-size:.72rem;color:#3a3a3a;letter-spacing:.06em;">Last one standing</p>
-  </div>
+  <!-- Winner card — gold film-festival border -->
+  <div class="card winner-card" style="text-align:center;position:relative;border-color:rgba(201,168,76,0.55);padding:28px 20px 24px;">
+    <!-- Corner accent marks -->
+    <span style="position:absolute;top:-1px;left:-1px;width:18px;height:18px;border-top:2px solid #c9a84c;border-left:2px solid #c9a84c;display:block;"></span>
+    <span style="position:absolute;top:-1px;right:-1px;width:18px;height:18px;border-top:2px solid #c9a84c;border-right:2px solid #c9a84c;display:block;"></span>
+    <span style="position:absolute;bottom:-1px;left:-1px;width:18px;height:18px;border-bottom:2px solid #c9a84c;border-left:2px solid #c9a84c;display:block;"></span>
+    <span style="position:absolute;bottom:-1px;right:-1px;width:18px;height:18px;border-bottom:2px solid #c9a84c;border-right:2px solid #c9a84c;display:block;"></span>
+
+    <!-- "WINNER" label in gold -->
+    <p style="font-size:.56rem;font-weight:700;letter-spacing:.36em;text-transform:uppercase;color:#c9a84c;margin-bottom:20px;">✦ &nbsp;Winner&nbsp; ✦</p>
+
+    <!-- Laurel branches flanking the name -->
+    <div style="display:flex;align-items:center;justify-content:center;gap:8px;">
+
+      <!-- Left laurel branch -->
+      <svg width="42" height="112" viewBox="0 0 42 112" style="flex-shrink:0;" xmlns="http://www.w3.org/2000/svg">
+        <g fill="#c9a84c" opacity="0.92">
+          <!-- Stem -->
+          <path d="M 11 109 C 9 82 7 42 12 5" stroke="#c9a84c" stroke-width="1.2" fill="none" opacity="0.4"/>
+          <!-- Leaves — bottom to top, fanning outward to the right -->
+          <ellipse cx="22" cy="99" rx="15" ry="5.5" transform="rotate(-9 22 99)"/>
+          <ellipse cx="21" cy="84" rx="14" ry="5.2" transform="rotate(-21 21 84)"/>
+          <ellipse cx="20" cy="69" rx="14" ry="5"   transform="rotate(-34 20 69)"/>
+          <ellipse cx="18" cy="55" rx="13" ry="4.8" transform="rotate(-47 18 55)"/>
+          <ellipse cx="17" cy="41" rx="12" ry="4.5" transform="rotate(-60 17 41)"/>
+          <ellipse cx="15" cy="28" rx="11" ry="4"   transform="rotate(-72 15 28)"/>
+          <ellipse cx="13" cy="16" rx="9"  ry="3.5" transform="rotate(-82 13 16)"/>
+          <!-- Top pip -->
+          <circle cx="12" cy="5" r="2.6"/>
+        </g>
+      </svg>
+
+      <!-- Winner name -->
+      <div style="flex:1;min-width:0;text-align:center;">
+        <p class="winner-name" id="winnerName" style="margin:0;line-height:1.1;word-break:break-word;">&mdash;</p>
+      </div>
+
+      <!-- Right laurel branch (horizontally mirrored via CSS) -->
+      <svg width="42" height="112" viewBox="0 0 42 112" style="flex-shrink:0;transform:scaleX(-1);" xmlns="http://www.w3.org/2000/svg">
+        <g fill="#c9a84c" opacity="0.92">
+          <path d="M 11 109 C 9 82 7 42 12 5" stroke="#c9a84c" stroke-width="1.2" fill="none" opacity="0.4"/>
+          <ellipse cx="22" cy="99" rx="15" ry="5.5" transform="rotate(-9 22 99)"/>
+          <ellipse cx="21" cy="84" rx="14" ry="5.2" transform="rotate(-21 21 84)"/>
+          <ellipse cx="20" cy="69" rx="14" ry="5"   transform="rotate(-34 20 69)"/>
+          <ellipse cx="18" cy="55" rx="13" ry="4.8" transform="rotate(-47 18 55)"/>
+          <ellipse cx="17" cy="41" rx="12" ry="4.5" transform="rotate(-60 17 41)"/>
+          <ellipse cx="15" cy="28" rx="11" ry="4"   transform="rotate(-72 15 28)"/>
+          <ellipse cx="13" cy="16" rx="9"  ry="3.5" transform="rotate(-82 13 16)"/>
+          <circle cx="12" cy="5" r="2.6"/>
+        </g>
+      </svg>
+
+    </div><!-- end laurel flex -->
+
+    <p style="font-size:.68rem;color:#2e2e2e;letter-spacing:.08em;margin-top:10px;margin-bottom:0;">Last one standing</p>
+
+    <!-- Quote — populated by JS -->
+    <div id="winnerQuote" style="display:none;border-top:1px solid #181818;margin-top:22px;padding-top:18px;">
+      <p id="winnerQuoteText" style="font-size:0.83rem;color:#3e3e3e;font-style:italic;line-height:1.78;margin-bottom:10px;"></p>
+      <p id="winnerQuoteSource" style="font-size:0.6rem;color:#2a2a2a;font-weight:500;letter-spacing:0.08em;"></p>
+    </div>
+  </div><!-- end winner card -->
 
   <div class="card">
     <label>Final Scores</label>
