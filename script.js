@@ -12,6 +12,52 @@ const FIREBASE_CONFIG = {
   appId:             "1:939941143928:web:56b3fd795abe61d75f148d"
 };
 
+// ============================================================
+//  Movie quote bank — edit freely to add / remove quotes
+// ============================================================
+const QUOTES = [
+  // Lord of the Rings
+  ['"All we have to decide is what to do with the time that is given us."', 'The Fellowship of the Ring'],
+  ['"One does not simply walk into Mordor."', 'The Fellowship of the Ring'],
+  ['"There\'s some good in this world, Mr. Frodo, and it\'s worth fighting for."', 'The Two Towers'],
+  ['"A wizard is never late, nor is he early."', 'The Fellowship of the Ring'],
+  ['"I am no man."', 'The Return of the King'],
+  // Hamlet 2
+  ['"It was stupid. But it was also theatre."', 'Hamlet 2'],
+  ['"Rock me, sexy Jesus."', 'Hamlet 2'],
+  // Safdie Brothers
+  ['"This is how I win."', 'Uncut Gems'],
+  ['"Why does everything with you have to be so complicated?"', 'Uncut Gems'],
+  // Almost Famous
+  ['"The only true currency in this bankrupt world is what you share with someone else when you\'re uncool."', 'Almost Famous'],
+  ['"It\'s all happening."', 'Almost Famous'],
+  ['"I am a golden god!"', 'Almost Famous'],
+  // Tick, Tick... Boom!
+  ['"The opposite of war isn\'t peace — it\'s creation."', 'Tick, Tick... Boom!'],
+  // La La Land
+  ['"Here\'s to the ones who dream, foolish as they may seem."', 'La La Land'],
+  ['"How are you gonna be a revolutionary if you\'re such a traditionalist?"', 'La La Land'],
+  ['"City of stars, are you shining just for me?"', 'La La Land'],
+  // Parasite
+  ['"You know what kind of plan never fails? No plan at all."', 'Parasite'],
+  ['"They\'re nice because they\'re rich."', 'Parasite'],
+  ['"I like your stone. It\'s so metaphorical."', 'Parasite'],
+  // Sinners
+  ['"You keep dancing with the devil... one day he\'s gonna follow you home."', 'Sinners'],
+  // Cult classics & indie
+  ['"I drink your milkshake!"', 'There Will Be Blood'],
+  ['"I\'m not even supposed to be here today!"', 'Clerks'],
+  ['"What we\'ve got here is a failure to communicate."', 'Cool Hand Luke'],
+  ['"I wish I knew how to quit you."', 'Brokeback Mountain'],
+  ['"We accept the love we think we deserve."', 'The Perks of Being a Wallflower'],
+  ['"Snap out of it!"', 'Moonstruck'],
+  ['"The greatest trick the devil ever pulled was convincing the world he didn\'t exist."', 'The Usual Suspects'],
+  ['"I have come here to chew bubblegum and kick ass — and I\'m all out of bubblegum."', 'They Live'],
+  ['"I\'m walkin\' here!"', 'Midnight Cowboy'],
+  ['"When you grow up, your heart dies."', 'The Breakfast Club'],
+  ['"Strange things are afoot at the Circle K."', 'Bill & Ted\'s Excellent Adventure'],
+];
+
 const TMDB_KEY  = '7ae222abae7a3ddc86b2deb7e8542a4a';
 const TMDB_BASE = 'https://api.themoviedb.org/3';
 const WORD      = 'MOVIE';
@@ -1195,7 +1241,40 @@ document.getElementById('playAgainBtn').addEventListener('click', () => {
 // ============================================================
 //  Auto-fill room code from invite link (?room=XXXX)
 // ============================================================
+// ============================================================
+//  Rotating quote subtitle
+// ============================================================
+function startQuoteRotation() {
+  const el = document.getElementById('quoteSubtitle');
+  if (!el) return;
+
+  // Shuffle so it's not the same order every visit
+  const shuffled = [...QUOTES].sort(() => Math.random() - 0.5);
+  let idx = 0;
+
+  function showQuote() {
+    const [quote, film] = shuffled[idx];
+    el.innerHTML = `${quote} <span style="font-style:normal;font-size:0.65rem;letter-spacing:0.1em;color:#333;">— ${film}</span>`;
+    idx = (idx + 1) % shuffled.length;
+  }
+
+  // Show first quote immediately
+  el.style.opacity = '1';
+  showQuote();
+
+  // Rotate every 5 seconds
+  setInterval(() => {
+    el.style.opacity = '0';
+    setTimeout(() => {
+      showQuote();
+      el.style.opacity = '1';
+    }, 650);
+  }, 5000);
+}
+
 window.addEventListener('DOMContentLoaded', async () => {
+  startQuoteRotation();
+
   // Try to silently rejoin an active session (refresh / crash recovery)
   if (firebaseReady) {
     const rejoined = await tryRejoin();
