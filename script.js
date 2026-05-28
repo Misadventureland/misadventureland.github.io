@@ -762,7 +762,10 @@ function renderGame() {
     document.getElementById('waitingPanel').style.display = 'none';
     renderPrompt();
     renderDots();
-    document.getElementById('answerInput').focus();
+    // Don't steal focus if the player is currently typing in chat
+    if (document.activeElement?.id !== 'chatInput') {
+      document.getElementById('answerInput').focus();
+    }
   } else {
     document.getElementById('activeInput').style.display  = 'none';
     document.getElementById('waitingPanel').style.display = 'block';
