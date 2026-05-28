@@ -66,6 +66,7 @@ const WORD      = 'MOVIE';
 //  Firebase init
 // ============================================================
 let db            = null;
+let auth          = null;
 let firebaseReady = false;
 
 try {
@@ -110,7 +111,6 @@ let challengeSubmitting       = false;
 let lastSeenChallengeTs       = 0;
 let chatAttached              = false;
 let overlayTimer              = null;
-let auth              = null;
 let currentUser       = null;
 let gameStatsWritten  = false;
 
