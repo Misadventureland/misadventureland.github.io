@@ -225,6 +225,15 @@ async function signOutUser() {
   document.getElementById('playerName').value = '';
 }
 
+async function saveGameName(name) {
+  const trimmed = name.trim().slice(0, 20);
+  if (!currentUser || !db || !trimmed) return;
+  await db.ref(`users/${currentUser.uid}/gameName`).set(trimmed);
+  // Keep the main name input in sync
+  const nameInput = document.getElementById('playerName');
+  if (nameInput) nameInput.value = trimmed;
+}
+
 async function updateAuthUI() {
   const section   = document.getElementById('authSection');
   const signedOut = document.getElementById('authSignedOut');
@@ -251,14 +260,26 @@ async function updateAuthUI() {
     avatarEl.src = currentUser.photoURL ?? '';
     avatarEl.style.display = currentUser.photoURL ? 'block' : 'none';
   }
-  if (nameEl) nameEl.textContent = currentUser.displayName ?? currentUser.email ?? 'Player';
 
-  // Pull stats from Firebase and display a summary
+  // Pull stats + stored game name from Firebase
+  const gameNameInput = document.getElementById('gameNameInput');
   if (statsEl && db) {
     statsEl.textContent = '…';
     try {
       const snap  = await db.ref(`users/${currentUser.uid}`).once('value');
       const stats = snap.val();
+
+      // Prefer stored game name, fall back to Google display name
+      const gameName = stats?.gameName ?? currentUser.displayName ?? '';
+      if (gameNameInput) gameNameInput.value = gameName;
+
+      // Sync to playerName if the user hasn't typed something different
+      const nameInput  = document.getElementById('playerName');
+      if (nameInput) {
+        const cur = nameInput.value.trim();
+        if (!cur || cur === currentUser.displayName) nameInput.value = gameName;
+      }
+
       if (stats?.gamesPlayed) {
         const g = stats.gamesPlayed;
         const w = stats.wins ?? 0;
@@ -267,7 +288,12 @@ async function updateAuthUI() {
       } else {
         statsEl.textContent = 'No games yet';
       }
-    } catch (_) { statsEl.textContent = ''; }
+    } catch (_) {
+      statsEl.textContent = '';
+      if (gameNameInput && !gameNameInput.value) {
+        gameNameInput.value = currentUser.displayName ?? '';
+      }
+    }
   }
 }
 
@@ -1232,6 +1258,19 @@ async function sendChat() {
 // Auth
 document.getElementById('googleSignInBtn').addEventListener('click', signInWithGoogle);
 document.getElementById('signOutBtn').addEventListener('click', signOutUser);
+
+// Editable game name — save on change (blur + value changed) or Enter key
+document.getElementById('gameNameInput').addEventListener('change', function () {
+  if (this.value.trim()) {
+    saveGameName(this.value);
+  } else {
+    // Don't allow blank — reset to Google display name
+    this.value = currentUser?.displayName ?? '';
+  }
+});
+document.getElementById('gameNameInput').addEventListener('keydown', function (e) {
+  if (e.key === 'Enter') this.blur();
+});
 
 // Landing
 document.getElementById('createBtn').addEventListener('click', () => {
