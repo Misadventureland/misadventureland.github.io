@@ -175,41 +175,67 @@ function playDing() {
 const SESSION_KEY = 'tmg_session';
 
 function saveSession() {
-  try {
-    localStorage.setItem(SESSION_KEY, JSON.stringify({ id: me.id, name: me.name, roomId }));
-  } catch (_) {}
+  // Always save locally (works for guests and same-device rejoin)
+  try { localStorage.setItem(SESSION_KEY, JSON.stringify({ id: me.id, name: me.name, roomId })); } catch (_) {}
+  // For signed-in users also mirror to Firebase — enables cross-device continuity
+  if (currentUser && db && roomId) {
+    db.ref(`users/${currentUser.uid}/activeSession`).set({
+      roomId,
+      playerId:   me.id,
+      playerName: me.name
+    }).catch(() => {});
+  }
 }
 
 function clearSession() {
   try { localStorage.removeItem(SESSION_KEY); } catch (_) {}
+  // Clear cloud session too so the slot doesn't linger on other devices
+  if (currentUser && db) {
+    db.ref(`users/${currentUser.uid}/activeSession`).remove().catch(() => {});
+  }
 }
 
 async function tryRejoin() {
   if (!firebaseReady) return false;
+
+  // 1. Cloud session — signed-in users can switch devices and pick up mid-game
+  if (currentUser) {
+    try {
+      const snap = await db.ref(`users/${currentUser.uid}/activeSession`).once('value');
+      const cs   = snap.val();
+      if (cs?.roomId && cs?.playerId) {
+        const ok = await restoreSession(cs.roomId, cs.playerId, cs.playerName ?? currentUser.displayName ?? 'Player');
+        if (ok) return true;
+        // Session was stale (room gone / player removed) — wipe it
+        db.ref(`users/${currentUser.uid}/activeSession`).remove().catch(() => {});
+      }
+    } catch (_) {}
+  }
+
+  // 2. localStorage fallback — guests, or same-device convenience for signed-in users
   let saved;
   try { saved = JSON.parse(localStorage.getItem(SESSION_KEY)); } catch (_) { return false; }
   if (!saved?.id || !saved?.name || !saved?.roomId) return false;
+  return restoreSession(saved.roomId, saved.id, saved.name);
+}
 
+// Shared rejoin logic — verifies the room + player still exist, then restores state
+async function restoreSession(rId, pId, pName) {
   try {
-    const snap = await db.ref(`rooms/${saved.roomId}`).once('value');
+    const snap = await db.ref(`rooms/${rId}`).once('value');
     if (!snap.exists()) { clearSession(); return false; }
-
     const state = snap.val();
-    // Player must still be in the room (not removed, not an unknown ID)
-    if (!state.players?.[saved.id]) { clearSession(); return false; }
+    if (!state.players?.[pId]) { clearSession(); return false; }
 
-    // Restore session
-    me.id   = saved.id;
-    me.name = saved.name;
-    roomId  = saved.roomId;
-    isHost  = state.hostId === saved.id;
-    // Don't re-write stats if rejoining an already-finished game
+    me.id   = pId;
+    me.name = pName;
+    roomId  = rId;
+    isHost  = state.hostId === pId;
     if (state.status === 'finished') gameStatsWritten = true;
-    roomRef = db.ref(`rooms/${saved.roomId}`);
+    roomRef = db.ref(`rooms/${rId}`);
 
-    // Keep both code displays updated
-    document.getElementById('lobbyCode').textContent = roomId;
-    document.getElementById('gameCode').textContent  = roomId;
+    document.getElementById('lobbyCode').textContent = rId;
+    document.getElementById('gameCode').textContent  = rId;
 
     roomRef.onDisconnect().update({ [`players/${me.id}/connected`]: false });
     attachListener();
@@ -1467,8 +1493,16 @@ function startQuoteRotation() {
 window.addEventListener('DOMContentLoaded', async () => {
   startQuoteRotation();
 
-  // Try to silently rejoin an active session (refresh / crash recovery)
   if (firebaseReady) {
+    // Wait for Firebase Auth to deliver its first state before attempting rejoin.
+    // This ensures currentUser is populated so tryRejoin can check the cloud
+    // session — which is what enables cross-device continuity for signed-in players.
+    if (auth) {
+      await new Promise(resolve => {
+        const unsub = auth.onAuthStateChanged(user => { unsub(); resolve(user); });
+      });
+    }
+
     const rejoined = await tryRejoin();
     if (rejoined) return; // back in the game — skip landing setup
   }
