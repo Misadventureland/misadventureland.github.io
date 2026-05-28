@@ -113,6 +113,7 @@ let chatAttached              = false;
 let overlayTimer              = null;
 let currentUser       = null;
 let gameStatsWritten  = false;
+let lastLogLength     = -1;   // -1 = haven't entered game yet; tracks chain length for ding
 
 // ============================================================
 //  Utilities
@@ -149,6 +150,23 @@ function debounce(fn, ms) {
 
 function tmdbImg(path, size = 'w92') {
   return path ? `https://image.tmdb.org/t/p/${size}${path}` : null;
+}
+
+function playDing() {
+  try {
+    const ctx  = new (window.AudioContext || window.webkitAudioContext)();
+    const osc  = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.type            = 'sine';
+    osc.frequency.value = 660;                                   // E5 — warm bell pitch
+    gain.gain.setValueAtTime(0.3, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 1.0);
+    osc.start(ctx.currentTime);
+    osc.stop(ctx.currentTime + 1.0);
+    osc.onended = () => ctx.close();                             // release resources
+  } catch (_) {}
 }
 
 // ============================================================
@@ -665,6 +683,12 @@ function renderGame() {
 
   document.getElementById('turnName').textContent = curPlayer.name ?? '?';
   renderChain();
+
+  // Ding when a new answer lands (skip the very first render so we don't ding on page load)
+  const logLen = Object.keys(roomSnap.log ?? {}).length;
+  if (lastLogLength >= 0 && logLen > lastLogLength) playDing();
+  lastLogLength = logLen;
+
   renderScores(order, players, curPid);
   renderChallengeUI(challenge, pending, players, myData);
 
@@ -1063,7 +1087,7 @@ async function leaveGame() {
 
   await roomRef.update(updates);
   if (listener) roomRef.off('value', listener);
-  listener = null; roomSnap = null; chatAttached = false;
+  listener = null; roomSnap = null; chatAttached = false; lastLogLength = -1;
   clearSession();
   document.getElementById('chatMessages').innerHTML = '';
   showScreen('screen-landing');
@@ -1396,7 +1420,7 @@ document.addEventListener('click', e => {
 document.getElementById('playAgainBtn').addEventListener('click', () => {
   if (listener) roomRef.off('value', listener);
   roomSnap = null; roomId = null; roomRef = null; isHost = false; listener = null;
-  chatAttached = false; lastSeenChallengeTs = 0; gameStatsWritten = false;
+  chatAttached = false; lastSeenChallengeTs = 0; gameStatsWritten = false; lastLogLength = -1;
   clearSession();
   document.getElementById('chatMessages').innerHTML = '';
   setFeedback('feedback', '', '');
