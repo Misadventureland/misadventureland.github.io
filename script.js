@@ -71,7 +71,8 @@ let firebaseReady = false;
 try {
   if (!FIREBASE_CONFIG.apiKey.startsWith('YOUR_')) {
     firebase.initializeApp(FIREBASE_CONFIG);
-    db = firebase.database();
+    db   = firebase.database();
+    auth = firebase.auth();
     firebaseReady = true;
   }
 } catch (e) {
@@ -80,6 +81,17 @@ try {
 
 if (!firebaseReady) {
   document.getElementById('firebase-notice').style.display = 'block';
+} else {
+  // Track Google sign-in state; updates landing screen UI when auth resolves
+  auth.onAuthStateChanged(user => {
+    currentUser = user;
+    updateAuthUI();
+    // Pre-fill name from Google account if the field is still empty
+    const nameInput = document.getElementById('playerName');
+    if (user && nameInput && !nameInput.value.trim()) {
+      nameInput.value = user.displayName ?? '';
+    }
+  });
 }
 
 // ============================================================
@@ -98,6 +110,9 @@ let challengeSubmitting       = false;
 let lastSeenChallengeTs       = 0;
 let chatAttached              = false;
 let overlayTimer              = null;
+let auth              = null;
+let currentUser       = null;
+let gameStatsWritten  = false;
 
 // ============================================================
 //  Utilities
@@ -170,6 +185,8 @@ async function tryRejoin() {
     me.name = saved.name;
     roomId  = saved.roomId;
     isHost  = state.hostId === saved.id;
+    // Don't re-write stats if rejoining an already-finished game
+    if (state.status === 'finished') gameStatsWritten = true;
     roomRef = db.ref(`rooms/${saved.roomId}`);
 
     // Keep both code displays updated
@@ -183,6 +200,74 @@ async function tryRejoin() {
     console.error('Rejoin failed:', e);
     clearSession();
     return false;
+  }
+}
+
+// ============================================================
+//  Auth — Google Sign-In
+// ============================================================
+async function signInWithGoogle() {
+  if (!auth) return;
+  try {
+    const provider = new firebase.auth.GoogleAuthProvider();
+    await auth.signInWithPopup(provider);
+  } catch (e) {
+    // Silently ignore popup-dismissed events; log anything unexpected
+    if (e.code !== 'auth/popup-closed-by-user' && e.code !== 'auth/cancelled-popup-request') {
+      console.error('Google sign-in error:', e);
+    }
+  }
+}
+
+async function signOutUser() {
+  if (!auth) return;
+  await auth.signOut();
+  document.getElementById('playerName').value = '';
+}
+
+async function updateAuthUI() {
+  const section   = document.getElementById('authSection');
+  const signedOut = document.getElementById('authSignedOut');
+  const signedIn  = document.getElementById('authSignedIn');
+  if (!section) return;
+
+  // Reveal the card now that we know auth state
+  section.style.display = 'block';
+
+  if (!currentUser) {
+    signedOut.style.display = 'block';
+    signedIn.style.display  = 'none';
+    return;
+  }
+
+  signedOut.style.display = 'none';
+  signedIn.style.display  = 'block';
+
+  const avatarEl = document.getElementById('authAvatar');
+  const nameEl   = document.getElementById('authDisplayName');
+  const statsEl  = document.getElementById('authStatsLine');
+
+  if (avatarEl) {
+    avatarEl.src = currentUser.photoURL ?? '';
+    avatarEl.style.display = currentUser.photoURL ? 'block' : 'none';
+  }
+  if (nameEl) nameEl.textContent = currentUser.displayName ?? currentUser.email ?? 'Player';
+
+  // Pull stats from Firebase and display a summary
+  if (statsEl && db) {
+    statsEl.textContent = '…';
+    try {
+      const snap  = await db.ref(`users/${currentUser.uid}`).once('value');
+      const stats = snap.val();
+      if (stats?.gamesPlayed) {
+        const g = stats.gamesPlayed;
+        const w = stats.wins ?? 0;
+        statsEl.textContent =
+          `${g} game${g !== 1 ? 's' : ''} · ${w} win${w !== 1 ? 's' : ''}`;
+      } else {
+        statsEl.textContent = 'No games yet';
+      }
+    } catch (_) { statsEl.textContent = ''; }
   }
 }
 
@@ -393,10 +478,11 @@ async function validateChallengeAnswer(input, challenge, preSelected = null) {
 //  Room creation & joining
 // ============================================================
 async function createRoom(name) {
-  me.id  = uid();
+  me.id  = currentUser ? currentUser.uid : uid();
   me.name = name;
   roomId = genRoomCode();
   isHost = true;
+  gameStatsWritten = false;
   roomRef = db.ref(`rooms/${roomId}`);
 
   await roomRef.set({
@@ -424,10 +510,11 @@ async function joinRoom(name, code) {
   const order = toArray(state.playerOrder);
   if (order.length >= 4) { alert('That room is full (4 players max).'); return; }
 
-  me.id  = uid();
+  me.id  = currentUser ? currentUser.uid : uid();
   me.name = name;
   roomId = code;
   isHost = false;
+  gameStatsWritten = false;
   roomRef = db.ref(`rooms/${roomId}`);
 
   await roomRef.update({
@@ -974,6 +1061,15 @@ function renderGameOver() {
   const order    = toArray(roomSnap.playerOrder);
   const winnerId = roomSnap.winner;
 
+  // Write stats once per game for signed-in users
+  if (currentUser && !gameStatsWritten) {
+    gameStatsWritten = true;
+    const myData     = players[me.id] ?? {};
+    const didWin     = winnerId === me.id;
+    const lettersGot = (myData.letters ?? '').length;
+    writeGameStats(didWin, lettersGot);
+  }
+
   document.getElementById('winnerName').textContent = players[winnerId]?.name ?? 'Nobody';
 
   document.getElementById('finalScores').innerHTML = order.map(pid => {
@@ -1004,6 +1100,33 @@ function renderGameOver() {
   finalChainEl.querySelectorAll('.chain-log-thumb.round[data-fullimg]').forEach(img => {
     img.addEventListener('click', () => openLightbox(img.dataset.fullimg, img.dataset.name));
   });
+}
+
+// ============================================================
+//  Stats — write to users/{uid} after a game ends
+// ============================================================
+async function writeGameStats(didWin, lettersGot) {
+  if (!currentUser || !db) return;
+  const ref = db.ref(`users/${currentUser.uid}`);
+  try {
+    // Transaction guarantees correct streak counts even across devices
+    await ref.transaction(prev => {
+      if (!prev) prev = {};
+      const newStreak = didWin ? (prev.currentStreak ?? 0) + 1 : 0;
+      return {
+        ...prev,
+        displayName:    currentUser.displayName ?? '',
+        gamesPlayed:    (prev.gamesPlayed    ?? 0) + 1,
+        wins:           (prev.wins           ?? 0) + (didWin ? 1 : 0),
+        losses:         (prev.losses         ?? 0) + (didWin ? 0 : 1),
+        lettersAllTime: (prev.lettersAllTime ?? 0) + lettersGot,
+        currentStreak:  newStreak,
+        bestStreak:     Math.max(prev.bestStreak ?? 0, newStreak),
+      };
+    });
+  } catch (e) {
+    console.error('Stats write failed:', e);
+  }
 }
 
 // ============================================================
@@ -1105,6 +1228,10 @@ async function sendChat() {
 // ============================================================
 //  Event listeners
 // ============================================================
+
+// Auth
+document.getElementById('googleSignInBtn').addEventListener('click', signInWithGoogle);
+document.getElementById('signOutBtn').addEventListener('click', signOutUser);
 
 // Landing
 document.getElementById('createBtn').addEventListener('click', () => {
@@ -1230,12 +1357,14 @@ document.addEventListener('click', e => {
 document.getElementById('playAgainBtn').addEventListener('click', () => {
   if (listener) roomRef.off('value', listener);
   roomSnap = null; roomId = null; roomRef = null; isHost = false; listener = null;
-  chatAttached = false; lastSeenChallengeTs = 0;
+  chatAttached = false; lastSeenChallengeTs = 0; gameStatsWritten = false;
   clearSession();
   document.getElementById('chatMessages').innerHTML = '';
   setFeedback('feedback', '', '');
-  document.getElementById('playerName').value = me.name ?? '';
+  // Pre-fill with Google name if signed in, otherwise keep last-used name
+  document.getElementById('playerName').value = currentUser?.displayName ?? me.name ?? '';
   showScreen('screen-landing');
+  updateAuthUI(); // refresh stats count on landing card
 });
 
 // ============================================================
