@@ -720,6 +720,14 @@ function renderGame() {
   document.getElementById('turnName').textContent = curPlayer.name ?? '?';
   renderChain();
 
+  // Opening retry notice — visible to everyone when opener must re-pick
+  const retryNotice = document.getElementById('openingRetryNotice');
+  if (retryNotice) {
+    const msg = roomSnap.openingRetryMsg ?? null;
+    retryNotice.textContent  = msg ?? '';
+    retryNotice.style.display = msg ? 'block' : 'none';
+  }
+
   // Ding when a new answer lands (skip the very first render so we don't ding on page load)
   const logLen = Object.keys(roomSnap.log ?? {}).length;
   if (lastLogLength >= 0 && logLen > lastLogLength) playDing();
@@ -944,6 +952,10 @@ async function advanceChain(result) {
   const nextIdx = nextActiveIndex(roomSnap.currentIdx, roomSnap.players);
   const entry   = { type: result.type, name: result.name, tmdbId: result.tmdbId, imagePath: result.imagePath ?? null };
 
+  // Is this the first item of a new round? If so, mark the opener so the
+  // opening-move protection rule can fire if the responder can't answer.
+  const isOpeningMove = !roomSnap.lastChainItem;
+
   // Build pendingChallenge so others can challenge this answer
   const prev = roomSnap.lastChainItem;
   const pending = {
@@ -964,14 +976,45 @@ async function advanceChain(result) {
     pendingChallenge: pending,
     challenge:        null,
     roundChooserPid:  null,
-    roundStartType:   null
+    roundStartType:   null,
+    // Opening-move protection: store opener's id so the responder failure path knows
+    openingMoveActive: isOpeningMove ? me.id : null,
+    openingRetryMsg:   null   // clear any previous retry message
   });
 }
 
 async function handleFailure() {
   const attempts = (roomSnap.currentAttempts ?? 0) + 1;
   if (attempts < 3) { await roomRef.update({ currentAttempts: attempts }); return; }
-  await assignLetterAndPass(me.id);
+  // Opening-move protection: if the responder can't answer the very first play
+  // of a round, the opener must choose a different movie/actor instead of the
+  // responder receiving a letter.
+  const openerPid = roomSnap.openingMoveActive;
+  if (openerPid && openerPid !== me.id) {
+    await retryOpeningMove(openerPid);
+  } else {
+    await assignLetterAndPass(me.id);
+  }
+}
+
+async function retryOpeningMove(openerPid) {
+  const players   = roomSnap.players ?? {};
+  const order     = toArray(roomSnap.playerOrder);
+  const openerIdx = order.indexOf(openerPid);
+  const typeWord  = roomSnap.roundStartType === 'actor' ? 'actor' : 'movie';
+  const respName  = players[me.id]?.name ?? 'Your opponent';
+
+  await roomRef.update({
+    log:               {},
+    lastChainItem:     null,
+    currentAttempts:   0,
+    currentIdx:        openerIdx >= 0 ? openerIdx : roomSnap.currentIdx,
+    pendingChallenge:  null,
+    challenge:         null,
+    openingMoveActive: null,
+    // Keep roundStartType so opener goes straight back to naming, not type-picking
+    openingRetryMsg:   `${respName} couldn't answer — pick a different ${typeWord}`
+  });
 }
 
 // ============================================================
@@ -1072,9 +1115,11 @@ async function assignLetterAndPass(pid) {
   const updates = {
     [`players/${pid}/letters`]: newLetters,
     [`players/${pid}/out`]:     isOut,
-    currentAttempts: 0,
-    challenge:        null,
-    pendingChallenge: null
+    currentAttempts:   0,
+    challenge:         null,
+    pendingChallenge:  null,
+    openingMoveActive: null,
+    openingRetryMsg:   null
   };
 
   if (stillIn.length <= 1) {
@@ -1422,8 +1467,19 @@ document.getElementById('giveUpBtn').addEventListener('click', async () => {
   if (!roomSnap) return;
   const order = toArray(roomSnap.playerOrder);
   if (order[roomSnap.currentIdx] !== me.id) return;
-  if (!confirm('Give up your turn? You\'ll receive a letter.')) return;
-  await assignLetterAndPass(me.id);
+
+  const openerPid = roomSnap.openingMoveActive;
+  const isOpeningResponse = openerPid && openerPid !== me.id;
+
+  if (isOpeningResponse) {
+    const openerName = (roomSnap.players ?? {})[openerPid]?.name ?? 'The opener';
+    const typeWord   = roomSnap.roundStartType === 'actor' ? 'actor' : 'movie';
+    if (!confirm(`Can't answer? ${openerName} will need to pick a different ${typeWord}.`)) return;
+    await retryOpeningMove(openerPid);
+  } else {
+    if (!confirm('Give up your turn? You\'ll receive a letter.')) return;
+    await assignLetterAndPass(me.id);
+  }
 });
 
 document.getElementById('leaveBtn').addEventListener('click', () => {
