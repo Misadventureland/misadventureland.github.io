@@ -275,7 +275,9 @@ async function signInWithGoogle() {
 async function signOutUser() {
   if (!auth) return;
   await auth.signOut();
-  document.getElementById('playerName').value = '';
+  const nameInput = document.getElementById('playerName');
+  if (nameInput) nameInput.value = '';
+  showScreen('screen-landing');
 }
 
 async function saveGameName(name) {
@@ -314,9 +316,9 @@ async function updateAuthUI() {
   signedOut.style.display = 'none';
   signedIn.style.display  = 'block';
 
-  const avatarEl = document.getElementById('authAvatar');
-  const nameEl   = document.getElementById('authDisplayName');
-  const statsEl  = document.getElementById('authStatsLine');
+  const avatarEl  = document.getElementById('authAvatar');
+  const nameEl    = document.getElementById('authDisplayName');
+  const statsEl   = document.getElementById('authStatsLine');
 
   if (avatarEl) {
     avatarEl.src = currentUser.photoURL ?? '';
@@ -324,19 +326,18 @@ async function updateAuthUI() {
   }
 
   // Pull stats + stored game name from Firebase
-  const gameNameInput = document.getElementById('gameNameInput');
-  if (statsEl && db) {
-    statsEl.textContent = '…';
+  if (db) {
+    if (statsEl) statsEl.textContent = '…';
     try {
       const snap  = await db.ref(`users/${currentUser.uid}`).once('value');
       const stats = snap.val();
 
       // Prefer stored game name, fall back to Google display name
       const gameName = stats?.gameName ?? currentUser.displayName ?? '';
-      if (gameNameInput) gameNameInput.value = gameName;
+      if (nameEl) nameEl.textContent = gameName;
 
       // Sync to playerName if the user hasn't typed something different
-      const nameInput  = document.getElementById('playerName');
+      const nameInput = document.getElementById('playerName');
       if (nameInput) {
         const cur = nameInput.value.trim();
         if (!cur || cur === currentUser.displayName) nameInput.value = gameName;
@@ -347,22 +348,20 @@ async function updateAuthUI() {
         saveGameName(currentUser.displayName).catch(() => {});
       }
 
-      if (stats?.gamesPlayed) {
-        const g = stats.gamesPlayed;
-        const w = stats.wins ?? 0;
-        statsEl.textContent =
-          `${g} game${g !== 1 ? 's' : ''} · ${w} win${w !== 1 ? 's' : ''}`;
-      } else {
-        statsEl.textContent = 'No games yet';
+      if (statsEl) {
+        if (stats?.gamesPlayed) {
+          const g = stats.gamesPlayed;
+          const w = stats.wins ?? 0;
+          statsEl.textContent = `${g} game${g !== 1 ? 's' : ''} · ${w} win${w !== 1 ? 's' : ''}`;
+        } else {
+          statsEl.textContent = 'No games yet';
+        }
       }
     } catch (_) {
-      statsEl.textContent = '';
-      if (gameNameInput && !gameNameInput.value) {
-        gameNameInput.value = currentUser.displayName ?? '';
-      }
+      if (statsEl) statsEl.textContent = '';
+      if (nameEl && !nameEl.textContent) nameEl.textContent = currentUser.displayName ?? '';
     }
   }
-  loadFriendsSection();
 }
 
 // ============================================================
@@ -825,6 +824,8 @@ function renderChallengeUI(challenge, pending, players, myData) {
   avail.style.display    = 'none';
   response.style.display = 'none';
   watching.style.display = 'none';
+  const revokeWrap = document.getElementById('revokeChallengeWrap');
+  if (revokeWrap) revokeWrap.style.display = 'none';
 
   if (challenge) {
     // An active challenge — decide what each player sees
@@ -838,12 +839,15 @@ function renderChallengeUI(challenge, pending, players, myData) {
         `Name another <strong>${dir}</strong> ${challenge.answerType === 'movie' ? `from <strong>${challenge.answerName}</strong>` : `starring <strong>${challenge.answerName}</strong>`}${exclude}`;
       document.getElementById('challengeInput').focus();
     } else {
-      // I'm watching — show spinner
+      // I'm watching (challenger or spectator) — show spinner
       watching.style.display = 'block';
       const challenged = players[challenge.challengedId]?.name ?? '?';
       const challenger = players[challenge.challengerId]?.name ?? '?';
       document.getElementById('challengeWatchText').innerHTML =
         `<strong style="color:#ede9e3">${challenger}</strong> challenged <strong style="color:#ede9e3">${challenged}</strong> — waiting for response…`;
+      // Show revoke button only to the challenger
+      const revokeWrap = document.getElementById('revokeChallengeWrap');
+      if (revokeWrap) revokeWrap.style.display = challenge.challengerId === me.id ? 'block' : 'none';
     }
     return;
   }
@@ -1052,6 +1056,24 @@ async function issueChallenge() {
   await roomRef.update({
     challenge:        { ...pending, challengerId: me.id },
     pendingChallenge: null
+  });
+}
+
+async function revokeChallenge() {
+  if (!roomSnap?.challenge) return;
+  const ch = roomSnap.challenge;
+  if (ch.challengerId !== me.id) return; // only the challenger can revoke
+  // Restore pendingChallenge so a re-challenge is still possible
+  await roomRef.update({
+    challenge: null,
+    pendingChallenge: {
+      challengedId: ch.challengedId,
+      answerType:   ch.answerType,
+      answerId:     ch.answerId,
+      answerName:   ch.answerName,
+      prevId:       ch.prevId   ?? null,
+      prevName:     ch.prevName ?? null
+    }
   });
 }
 
@@ -1405,23 +1427,67 @@ async function sendChat() {
 }
 
 // ============================================================
-//  Friends
+//  Account page
 // ============================================================
-async function loadFriendsSection() {
-  const section = document.getElementById('friendsSection');
-  if (!section) return;
-  if (!currentUser) { section.style.display = 'none'; return; }
-  section.style.display = 'block';
+async function showAccount() {
+  showScreen('screen-account');
+  await renderAccountPage();
+}
+
+async function renderAccountPage() {
+  if (!currentUser) { showScreen('screen-landing'); return; }
+
+  // Avatar
+  const avatarEl = document.getElementById('acctAvatar');
+  if (avatarEl) {
+    avatarEl.src = currentUser.photoURL ?? '';
+    avatarEl.style.display = currentUser.photoURL ? 'block' : 'none';
+  }
+
+  // Name input
+  const nameInput = document.getElementById('acctNameInput');
+  const nameFb    = document.getElementById('acctNameFeedback');
+
+  if (!db) return;
+  try {
+    const snap = await db.ref(`users/${currentUser.uid}`).once('value');
+    const data = snap.val() ?? {};
+
+    const gameName = data.gameName ?? currentUser.displayName ?? '';
+    if (nameInput) nameInput.value = gameName;
+
+    // Stats
+    const g = data.gamesPlayed ?? 0;
+    const w = data.wins        ?? 0;
+    const l = data.losses      ?? 0;
+    const s = data.currentStreak ?? 0;
+    const b = data.bestStreak    ?? 0;
+    const setEl = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+    setEl('acctGamesPlayed', g || '0');
+    setEl('acctWins',        w || '0');
+    setEl('acctLosses',      l || '0');
+    setEl('acctStreak',      s || '0');
+    setEl('acctBestStreak',  b || '0');
+    setEl('acctWinRate',     g > 0 ? `${Math.round(w / g * 100)}%` : '—');
+  } catch (_) {}
+
+  // Friends
   await Promise.all([renderFriendsList(), renderFriendRequests()]);
 }
+
+// ============================================================
+//  Friends
+// ============================================================
 
 async function renderFriendsList() {
   if (!currentUser || !db) return;
   const snap    = await db.ref(`users/${currentUser.uid}/friends`).once('value');
   const friends = snap.val() ?? {};
   const entries = Object.entries(friends);
-  document.getElementById('friendCount').textContent = entries.length;
-  const el = document.getElementById('friendsList');
+  const countEl = document.getElementById('acctFriendCount');
+  if (countEl) countEl.textContent = entries.length;
+  const el = document.getElementById('acctFriendsList');
+  if (!el) return;
   if (!entries.length) {
     el.innerHTML = '<p style="font-size:0.78rem;color:var(--dim);padding:4px 0;">No friends yet — add one below</p>';
     return;
@@ -1443,8 +1509,9 @@ async function renderFriendRequests() {
   const snap     = await db.ref(`users/${currentUser.uid}/friendRequests`).once('value');
   const requests = snap.val() ?? {};
   const entries  = Object.entries(requests);
-  const card = document.getElementById('friendRequestsCard');
-  const list = document.getElementById('friendRequestsList');
+  const card = document.getElementById('acctFriendRequestsCard');
+  const list = document.getElementById('acctFriendRequestsList');
+  if (!card || !list) return;
   if (!entries.length) { card.style.display = 'none'; return; }
   card.style.display = 'block';
   list.innerHTML = entries.map(([fuid, d]) =>
@@ -1466,9 +1533,9 @@ async function renderFriendRequests() {
 
 async function sendFriendRequest() {
   if (!currentUser || !db) return;
-  const input = document.getElementById('addFriendInput');
-  const fb    = document.getElementById('addFriendFeedback');
-  const name  = input.value.trim();
+  const input = document.getElementById('acctAddFriendInput');
+  const fb    = document.getElementById('acctAddFriendFeedback');
+  const name  = input?.value.trim() ?? '';
   if (!name) return;
   fb.style.color = 'var(--dim)';
   fb.textContent = 'Looking up…';
@@ -1683,13 +1750,41 @@ async function endPractice() {
 //  Event listeners
 // ============================================================
 
-// Auth
+// Auth — landing
 document.getElementById('googleSignInBtn').addEventListener('click', signInWithGoogle);
-document.getElementById('signOutBtn').addEventListener('click', signOutUser);
+document.getElementById('accountBtn').addEventListener('click', showAccount);
 
-// Friends
-document.getElementById('addFriendBtn').addEventListener('click', sendFriendRequest);
-document.getElementById('addFriendInput').addEventListener('keydown', e => { if (e.key === 'Enter') sendFriendRequest(); });
+// Account page
+document.getElementById('accountBackBtn').addEventListener('click', () => {
+  showScreen('screen-landing');
+  updateAuthUI(); // refresh compact display
+});
+document.getElementById('acctSignOutBtn').addEventListener('click', signOutUser);
+document.getElementById('acctNameInput').addEventListener('change', function () {
+  const fb = document.getElementById('acctNameFeedback');
+  const val = this.value.trim();
+  if (val) {
+    saveGameName(val).then(() => {
+      if (fb) { fb.style.color = 'var(--ok)'; fb.textContent = 'Name saved!'; setTimeout(() => { fb.textContent = ''; }, 2000); }
+      // Update compact landing display
+      const dn = document.getElementById('authDisplayName');
+      if (dn) dn.textContent = val;
+    }).catch(() => {
+      if (fb) { fb.style.color = 'var(--red)'; fb.textContent = 'Save failed — try again'; }
+    });
+  } else {
+    // Don't allow blank — restore saved name
+    const saved = document.getElementById('authDisplayName')?.textContent || currentUser?.displayName || '';
+    this.value = saved;
+  }
+});
+document.getElementById('acctNameInput').addEventListener('keydown', function (e) {
+  if (e.key === 'Enter') this.blur();
+});
+
+// Friends — account page
+document.getElementById('acctAddFriendBtn').addEventListener('click', sendFriendRequest);
+document.getElementById('acctAddFriendInput').addEventListener('keydown', e => { if (e.key === 'Enter') sendFriendRequest(); });
 
 // Practice — landing entry
 document.getElementById('practiceBtn').addEventListener('click', enterPractice);
@@ -1725,18 +1820,7 @@ document.getElementById('endPracticeBtn').addEventListener('click', () => {
 document.getElementById('practiceTryAgainBtn').addEventListener('click', enterPractice);
 document.getElementById('practiceBackBtn').addEventListener('click', () => showScreen('screen-landing'));
 
-// Editable game name — save on change (blur + value changed) or Enter key
-document.getElementById('gameNameInput').addEventListener('change', function () {
-  if (this.value.trim()) {
-    saveGameName(this.value);
-  } else {
-    // Don't allow blank — reset to Google display name
-    this.value = currentUser?.displayName ?? '';
-  }
-});
-document.getElementById('gameNameInput').addEventListener('keydown', function (e) {
-  if (e.key === 'Enter') this.blur();
-});
+
 
 // Landing
 document.getElementById('createBtn').addEventListener('click', () => {
@@ -1813,6 +1897,7 @@ document.getElementById('challengeInput').addEventListener('input', function () 
 
 // Challenge buttons
 document.getElementById('challengeBtn').addEventListener('click', issueChallenge);
+document.getElementById('revokeChallengeBtn').addEventListener('click', revokeChallenge);
 
 document.getElementById('challengeGiveUpBtn').addEventListener('click', async () => {
   const challenge = roomSnap?.challenge;

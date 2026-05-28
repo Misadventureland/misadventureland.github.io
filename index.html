@@ -488,6 +488,29 @@
     .game-name-input:focus { border-bottom-color: var(--red); }
     .game-name-input::placeholder { color: var(--dim); }
 
+    /* ── Account page stat tiles ── */
+    .stat-tile {
+      background: var(--s2);
+      border: 1px solid var(--bd);
+      padding: 16px 10px 12px;
+      text-align: center;
+    }
+    .stat-value {
+      font-size: 1.9rem;
+      font-weight: 700;
+      color: var(--text);
+      letter-spacing: 0.01em;
+      line-height: 1;
+    }
+    .stat-label {
+      font-size: 0.56rem;
+      font-weight: 600;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--dim);
+      margin-top: 6px;
+    }
+
     /* ── Invite-mode: focused join layout ── */
     body.invite-mode #createBtn,
     body.invite-mode .divider { display: none !important; }
@@ -594,33 +617,12 @@
     <!-- Signed in -->
     <div id="authSignedIn" style="display:none;">
       <div style="display:flex;align-items:center;gap:12px;">
-        <img id="authAvatar" src="" alt="" style="width:34px;height:34px;border-radius:50%;background:var(--s2);flex-shrink:0;display:none;">
+        <img id="authAvatar" src="" alt="" style="width:36px;height:36px;border-radius:50%;background:var(--s2);flex-shrink:0;display:none;">
         <div style="flex:1;min-width:0;">
-          <input id="gameNameInput" class="game-name-input" type="text" maxlength="20" autocomplete="off" spellcheck="false" title="Click to edit your game name" placeholder="Game name…">
+          <div id="authDisplayName" style="font-size:0.92rem;font-weight:600;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;letter-spacing:0.01em;"></div>
           <div id="authStatsLine" style="font-size:0.65rem;color:var(--dim);margin-top:3px;letter-spacing:0.06em;"></div>
         </div>
-        <button id="signOutBtn" style="background:none;border:none;color:var(--dim);font-size:0.62rem;font-weight:500;letter-spacing:0.12em;cursor:pointer;font-family:inherit;text-transform:uppercase;padding:4px 0;flex-shrink:0;">Sign out</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Friends section — signed-in only -->
-  <div id="friendsSection" style="display:none;margin-bottom:10px;">
-    <!-- Pending requests (hidden when empty) -->
-    <div class="card" id="friendRequestsCard" style="display:none;margin-bottom:10px;border-left:2px solid var(--red);">
-      <label style="color:var(--red);">Friend Requests</label>
-      <div id="friendRequestsList"></div>
-    </div>
-    <!-- Friends list + add friend -->
-    <div class="card">
-      <label>Friends (<span id="friendCount">0</span>)</label>
-      <div id="friendsList" style="min-height:10px;margin-bottom:14px;"></div>
-      <div style="border-top:1px solid var(--bd);padding-top:14px;">
-        <div class="input-row" style="gap:8px;">
-          <input type="text" id="addFriendInput" placeholder="Find by game name…" maxlength="20" autocomplete="off">
-          <button class="btn btn-outline" id="addFriendBtn" style="width:auto;padding:10px 14px;margin-top:0;font-size:0.65rem;letter-spacing:0.14em;">Add</button>
-        </div>
-        <p id="addFriendFeedback" style="font-size:0.72rem;min-height:18px;margin-top:8px;letter-spacing:0.03em;"></p>
+        <button id="accountBtn" style="background:none;border:1px solid var(--bd2);color:var(--dim);font-size:0.58rem;font-weight:600;letter-spacing:0.14em;cursor:pointer;font-family:inherit;text-transform:uppercase;padding:7px 11px;flex-shrink:0;transition:border-color 0.15s,color 0.15s;" onmouseover="this.style.borderColor='var(--text)';this.style.color='var(--text)'" onmouseout="this.style.borderColor='var(--bd2)';this.style.color='var(--dim)'">Account</button>
       </div>
     </div>
   </div>
@@ -738,6 +740,10 @@
       <div class="spinner"></div>
       <p id="challengeWatchText" style="font-size:0.85rem;"></p>
     </div>
+    <!-- Revoke button — only visible to the challenger -->
+    <div id="revokeChallengeWrap" style="display:none;text-align:center;margin-top:4px;">
+      <button id="revokeChallengeBtn" style="background:none;border:none;color:var(--dim);font-size:0.6rem;font-weight:500;letter-spacing:0.14em;cursor:pointer;font-family:inherit;text-transform:uppercase;padding:4px 8px;" onmouseover="this.style.color='var(--red)'" onmouseout="this.style.color='var(--dim)'">Revoke Challenge</button>
+    </div>
   </div>
 
   <!-- My turn -->
@@ -804,6 +810,81 @@
   </div>
 
   <button class="btn btn-gold" id="playAgainBtn" style="margin-top:16px;">Play Again</button>
+</div>
+
+<!-- ══ ACCOUNT ════════════════════════════════════════ -->
+<div id="screen-account" class="screen">
+
+  <div class="game-topbar" style="margin-bottom:28px;">
+    <button id="accountBackBtn" style="background:none;border:none;color:var(--dim);font-size:0.62rem;font-weight:500;letter-spacing:0.14em;cursor:pointer;font-family:inherit;text-transform:uppercase;padding:0;" onmouseover="this.style.color='var(--text)'" onmouseout="this.style.color='var(--dim)'">← Back</button>
+    <div style="font-size:0.6rem;font-weight:600;letter-spacing:0.22em;text-transform:uppercase;color:var(--dim);">My Account</div>
+  </div>
+
+  <!-- Profile -->
+  <div class="card" style="margin-bottom:10px;">
+    <div style="display:flex;align-items:center;gap:16px;margin-bottom:20px;">
+      <img id="acctAvatar" src="" alt="" style="width:52px;height:52px;border-radius:50%;background:var(--s2);flex-shrink:0;display:none;">
+      <div style="flex:1;min-width:0;">
+        <label style="margin-bottom:6px;">Game Name</label>
+        <input id="acctNameInput" class="game-name-input" type="text" maxlength="20" autocomplete="off" spellcheck="false" placeholder="Your game name…" style="font-size:1rem;">
+        <p id="acctNameFeedback" style="font-size:0.62rem;color:var(--dim);margin-top:6px;min-height:16px;letter-spacing:0.04em;"></p>
+      </div>
+    </div>
+    <button id="acctSignOutBtn" style="background:none;border:1px solid var(--bd2);color:var(--dim);font-size:0.58rem;font-weight:600;letter-spacing:0.14em;cursor:pointer;font-family:inherit;text-transform:uppercase;padding:8px 14px;width:100%;transition:border-color 0.15s,color 0.15s;" onmouseover="this.style.borderColor='var(--red)';this.style.color='var(--red)'" onmouseout="this.style.borderColor='var(--bd2)';this.style.color='var(--dim)'">Sign Out</button>
+  </div>
+
+  <!-- Stats -->
+  <div class="card" style="margin-bottom:10px;">
+    <label style="margin-bottom:14px;">Stats</label>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:8px;">
+      <div class="stat-tile">
+        <div class="stat-value" id="acctGamesPlayed">—</div>
+        <div class="stat-label">Games</div>
+      </div>
+      <div class="stat-tile">
+        <div class="stat-value" id="acctWins">—</div>
+        <div class="stat-label">⭐ Wins</div>
+      </div>
+      <div class="stat-tile">
+        <div class="stat-value" id="acctLosses">—</div>
+        <div class="stat-label">Losses</div>
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;">
+      <div class="stat-tile">
+        <div class="stat-value" id="acctStreak">—</div>
+        <div class="stat-label">🔥 Streak</div>
+      </div>
+      <div class="stat-tile">
+        <div class="stat-value" id="acctBestStreak">—</div>
+        <div class="stat-label">Best</div>
+      </div>
+      <div class="stat-tile">
+        <div class="stat-value" id="acctWinRate">—</div>
+        <div class="stat-label">Win Rate</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Friend requests — hidden when empty -->
+  <div class="card" id="acctFriendRequestsCard" style="display:none;margin-bottom:10px;border-left:2px solid var(--red);">
+    <label style="color:var(--red);margin-bottom:10px;">Friend Requests</label>
+    <div id="acctFriendRequestsList"></div>
+  </div>
+
+  <!-- Friends list + add friend -->
+  <div class="card" style="margin-bottom:10px;">
+    <label style="margin-bottom:10px;">Friends (<span id="acctFriendCount">0</span>)</label>
+    <div id="acctFriendsList" style="min-height:10px;margin-bottom:14px;"></div>
+    <div style="border-top:1px solid var(--bd);padding-top:14px;">
+      <div class="input-row" style="gap:8px;">
+        <input type="text" id="acctAddFriendInput" placeholder="Find by game name…" maxlength="20" autocomplete="off">
+        <button class="btn btn-outline" id="acctAddFriendBtn" style="width:auto;padding:10px 14px;margin-top:0;font-size:0.65rem;letter-spacing:0.14em;">Add</button>
+      </div>
+      <p id="acctAddFriendFeedback" style="font-size:0.72rem;min-height:18px;margin-top:8px;letter-spacing:0.03em;"></p>
+    </div>
+  </div>
+
 </div>
 
 <!-- ══ PRACTICE ═══════════════════════════════════════ -->
