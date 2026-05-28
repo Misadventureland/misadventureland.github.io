@@ -91,6 +91,56 @@ function tmdbImg(path, size = 'w92') {
 }
 
 // ============================================================
+//  Session persistence (rejoin after refresh / crash)
+// ============================================================
+const SESSION_KEY = 'tmg_session';
+
+function saveSession() {
+  try {
+    localStorage.setItem(SESSION_KEY, JSON.stringify({ id: me.id, name: me.name, roomId }));
+  } catch (_) {}
+}
+
+function clearSession() {
+  try { localStorage.removeItem(SESSION_KEY); } catch (_) {}
+}
+
+async function tryRejoin() {
+  if (!firebaseReady) return false;
+  let saved;
+  try { saved = JSON.parse(localStorage.getItem(SESSION_KEY)); } catch (_) { return false; }
+  if (!saved?.id || !saved?.name || !saved?.roomId) return false;
+
+  try {
+    const snap = await db.ref(`rooms/${saved.roomId}`).once('value');
+    if (!snap.exists()) { clearSession(); return false; }
+
+    const state = snap.val();
+    // Player must still be in the room (not removed, not an unknown ID)
+    if (!state.players?.[saved.id]) { clearSession(); return false; }
+
+    // Restore session
+    me.id   = saved.id;
+    me.name = saved.name;
+    roomId  = saved.roomId;
+    isHost  = state.hostId === saved.id;
+    roomRef = db.ref(`rooms/${saved.roomId}`);
+
+    // Keep both code displays updated
+    document.getElementById('lobbyCode').textContent = roomId;
+    document.getElementById('gameCode').textContent  = roomId;
+
+    roomRef.onDisconnect().update({ [`players/${me.id}/connected`]: false });
+    attachListener();
+    return true;
+  } catch (e) {
+    console.error('Rejoin failed:', e);
+    clearSession();
+    return false;
+  }
+}
+
+// ============================================================
 //  TMDB helpers
 // ============================================================
 async function tmdbFetch(path, params = {}) {
@@ -315,6 +365,7 @@ async function createRoom(name) {
   });
 
   roomRef.onDisconnect().update({ [`players/${me.id}/connected`]: false });
+  saveSession();
   attachListener();
   goLobby();
 }
@@ -339,6 +390,7 @@ async function joinRoom(name, code) {
   });
 
   roomRef.onDisconnect().update({ [`players/${me.id}/connected`]: false });
+  saveSession();
   attachListener();
   goLobby();
 }
@@ -853,6 +905,7 @@ async function leaveGame() {
   await roomRef.update(updates);
   if (listener) roomRef.off('value', listener);
   listener = null; roomSnap = null; chatAttached = false;
+  clearSession();
   document.getElementById('chatMessages').innerHTML = '';
   showScreen('screen-landing');
 }
@@ -1132,6 +1185,7 @@ document.getElementById('playAgainBtn').addEventListener('click', () => {
   if (listener) roomRef.off('value', listener);
   roomSnap = null; roomId = null; roomRef = null; isHost = false; listener = null;
   chatAttached = false; lastSeenChallengeTs = 0;
+  clearSession();
   document.getElementById('chatMessages').innerHTML = '';
   setFeedback('feedback', '', '');
   document.getElementById('playerName').value = me.name ?? '';
@@ -1141,14 +1195,20 @@ document.getElementById('playAgainBtn').addEventListener('click', () => {
 // ============================================================
 //  Auto-fill room code from invite link (?room=XXXX)
 // ============================================================
-window.addEventListener('DOMContentLoaded', () => {
+window.addEventListener('DOMContentLoaded', async () => {
+  // Try to silently rejoin an active session (refresh / crash recovery)
+  if (firebaseReady) {
+    const rejoined = await tryRejoin();
+    if (rejoined) return; // back in the game — skip landing setup
+  }
+
+  // Normal landing screen setup
   const params = new URLSearchParams(window.location.search);
   const invite = params.get('room');
   if (invite && /^[A-Z0-9]{4}$/i.test(invite)) {
     const codeEl = document.getElementById('joinCode');
     codeEl.value = invite.toUpperCase();
     codeEl.style.borderColor = '#c9a227';
-    // Focused invite-join mode: hide "Create Game" option, focus name field
     document.body.classList.add('invite-mode');
     document.getElementById('playerName').focus();
   }
