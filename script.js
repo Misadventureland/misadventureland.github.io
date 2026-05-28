@@ -435,7 +435,7 @@ function renderLobby() {
 
   document.getElementById('playersList').innerHTML = order.map(pid => {
     const p = players[pid] ?? {};
-    return `<li style="${pid === me.id ? 'color:#c9a227' : ''}">
+    return `<li style="${pid === me.id ? 'color:#ede9e3;font-weight:600' : ''}">
       ${p.name ?? '?'}
       ${pid === roomSnap.hostId ? '<span class="host-badge">HOST</span>' : ''}
       ${pid === me.id ? '<span class="me-badge">(you)</span>' : ''}
@@ -589,7 +589,7 @@ function renderChallengeUI(challenge, pending, players, myData) {
       const challenged = players[challenge.challengedId]?.name ?? '?';
       const challenger = players[challenge.challengerId]?.name ?? '?';
       document.getElementById('challengeWatchText').innerHTML =
-        `<strong style="color:#c9a227">${challenger}</strong> challenged <strong style="color:#c9a227">${challenged}</strong> — waiting for response…`;
+        `<strong style="color:#ede9e3">${challenger}</strong> challenged <strong style="color:#ede9e3">${challenged}</strong> — waiting for response…`;
     }
     return;
   }
@@ -934,8 +934,8 @@ function renderGameOver() {
     const p = players[pid] ?? {};
     const w = pid === winnerId;
     return `<div class="score-row">
-      <span style="color:${w ? '#c9a227' : '#aaa'}">${p.name ?? '?'}${w ? ' 🏆' : ''}</span>
-      <span style="color:#d45c5c;letter-spacing:.12em">${p.letters || '—'}</span>
+      <span style="color:${w ? '#ede9e3' : '#4a4a4a'};font-weight:${w ? '600' : '400'}">${p.name ?? '?'}${w ? ' ◆' : ''}</span>
+      <span style="color:#c0182b;letter-spacing:.1em;font-weight:700">${p.letters || '—'}</span>
     </div>`;
   }).join('');
 
@@ -987,16 +987,16 @@ function showChallengeOverlay(r) {
                                                            'Challenge Over';
   let sub;
   if (iWon) {
-    sub = `<strong style="color:#e0d8cc">${r.loserName}</strong> received the letter ` +
-          `<strong style="color:#d45c5c">${r.loserLetter}</strong>`;
+    sub = `<strong style="color:#ede9e3">${r.loserName}</strong> received the letter ` +
+          `<strong style="color:#c0182b">${r.loserLetter}</strong>`;
   } else if (iLost) {
     sub = r.winningAnswer
-      ? `<strong style="color:#e0d8cc">${r.winnerName}</strong> proved it`
+      ? `<strong style="color:#ede9e3">${r.winnerName}</strong> proved it`
       : `You couldn't prove the connection`;
   } else {
-    sub = `<strong style="color:#c9a227">${r.winnerName}</strong> won — ` +
-          `<strong style="color:#e0d8cc">${r.loserName}</strong> received ` +
-          `<strong style="color:#d45c5c">${r.loserLetter}</strong>`;
+    sub = `<strong style="color:#ede9e3">${r.winnerName}</strong> won — ` +
+          `<strong style="color:#ede9e3">${r.loserName}</strong> received ` +
+          `<strong style="color:#c0182b">${r.loserLetter}</strong>`;
   }
   document.getElementById('coSub').innerHTML = sub;
 
@@ -1208,7 +1208,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   if (invite && /^[A-Z0-9]{4}$/i.test(invite)) {
     const codeEl = document.getElementById('joinCode');
     codeEl.value = invite.toUpperCase();
-    codeEl.style.borderColor = '#c9a227';
+    codeEl.style.borderBottomColor = '#c0182b';
     document.body.classList.add('invite-mode');
     document.getElementById('playerName').focus();
   }
