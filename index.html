@@ -70,7 +70,9 @@
       text-transform: none;
       margin-top: 18px;
       margin-bottom: 52px;
-      min-height: 1.4em;
+      /* Reserve two full lines so rotating quotes never push elements down */
+      min-height: 3.5em;
+      line-height: 1.65;
       transition: opacity 0.65s ease;
     }
     label {
@@ -622,7 +624,10 @@
           <div id="authDisplayName" style="font-size:0.92rem;font-weight:600;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;letter-spacing:0.01em;"></div>
           <div id="authStatsLine" style="font-size:0.65rem;color:var(--dim);margin-top:3px;letter-spacing:0.06em;"></div>
         </div>
-        <button id="accountBtn" style="background:none;border:1px solid var(--bd2);color:var(--dim);font-size:0.58rem;font-weight:600;letter-spacing:0.14em;cursor:pointer;font-family:inherit;text-transform:uppercase;padding:7px 11px;flex-shrink:0;transition:border-color 0.15s,color 0.15s;" onmouseover="this.style.borderColor='var(--text)';this.style.color='var(--text)'" onmouseout="this.style.borderColor='var(--bd2)';this.style.color='var(--dim)'">Account</button>
+        <div style="display:flex;flex-direction:column;align-items:flex-end;gap:5px;flex-shrink:0;">
+          <button id="accountBtn" style="background:none;border:1px solid var(--bd2);color:var(--dim);font-size:0.58rem;font-weight:600;letter-spacing:0.14em;cursor:pointer;font-family:inherit;text-transform:uppercase;padding:7px 11px;transition:border-color 0.15s,color 0.15s;" onmouseover="this.style.borderColor='var(--text)';this.style.color='var(--text)'" onmouseout="this.style.borderColor='var(--bd2)';this.style.color='var(--dim)'">Account</button>
+          <button id="landingSignOutBtn" style="background:none;border:none;color:var(--dim);font-size:0.52rem;font-weight:500;letter-spacing:0.14em;cursor:pointer;font-family:inherit;text-transform:uppercase;padding:0;line-height:1;" onmouseover="this.style.color='var(--red)'" onmouseout="this.style.color='var(--dim)'">Sign out</button>
+        </div>
       </div>
     </div>
   </div>
@@ -1021,6 +1026,9 @@
   <div class="co-answer" id="coAnswer"></div>
   <div class="co-dismiss">Tap anywhere to dismiss</div>
 </div>
+
+<!-- Toast notification -->
+<div id="toast" style="display:none;position:fixed;bottom:32px;left:50%;transform:translateX(-50%);padding:11px 22px;font-size:0.75rem;font-weight:500;letter-spacing:0.04em;z-index:3000;text-align:center;max-width:300px;pointer-events:none;transition:opacity 0.25s ease;font-family:'Space Grotesk',sans-serif;"></div>
 
 <!-- Firebase Realtime Database SDK (compat) -->
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>

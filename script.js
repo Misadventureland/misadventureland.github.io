@@ -734,11 +734,16 @@ function renderLobby() {
   document.getElementById('playerCount').textContent = order.length;
 
   document.getElementById('playersList').innerHTML = order.map(pid => {
-    const p = players[pid] ?? {};
-    return `<li style="${pid === me.id ? 'color:#ede9e3;font-weight:600' : ''}">
-      ${p.name ?? '?'}
-      ${pid === roomSnap.hostId ? '<span class="host-badge">HOST</span>' : ''}
-      ${pid === me.id ? '<span class="me-badge">(you)</span>' : ''}
+    const p      = players[pid] ?? {};
+    const canAdd = currentUser && pid !== me.id;
+    return `<li style="${pid === me.id ? 'color:#ede9e3;font-weight:600' : ''};display:flex;align-items:center;gap:6px;">
+      <span style="flex:1;">${p.name ?? '?'}
+        ${pid === roomSnap.hostId ? '<span class="host-badge">HOST</span>' : ''}
+        ${pid === me.id ? '<span class="me-badge">(you)</span>' : ''}
+      </span>
+      ${canAdd ? `<button data-add-friend="${escHtml(p.name ?? '')}"
+        style="background:none;border:none;color:var(--dim);font-size:0.54rem;font-weight:600;letter-spacing:0.14em;text-transform:uppercase;cursor:pointer;font-family:inherit;padding:3px 0;white-space:nowrap;"
+        onmouseover="this.style.color='var(--ok)'" onmouseout="this.style.color='var(--dim)'">+ Add</button>` : ''}
     </li>`;
   }).join('');
 
@@ -987,10 +992,14 @@ function renderDots() {
 
 function renderScores(order, players, curPid) {
   document.getElementById('scores').innerHTML = order.map(pid => {
-    const p = players[pid] ?? {};
+    const p      = players[pid] ?? {};
+    const canAdd = currentUser && pid !== me.id;
     return `<div class="score-card ${pid === curPid ? 'active-turn' : ''} ${p.out ? 'out' : ''}">
       <div class="score-name">${p.name ?? '?'}</div>
       <div class="score-letters">${p.letters || ' '}</div>
+      ${canAdd ? `<button data-add-friend="${escHtml(p.name ?? '')}"
+        style="background:none;border:none;color:var(--dim);font-size:0.46rem;font-weight:600;letter-spacing:0.12em;text-transform:uppercase;cursor:pointer;font-family:inherit;padding:3px 0;display:block;width:100%;margin-top:2px;"
+        onmouseover="this.style.color='var(--ok)'" onmouseout="this.style.color='var(--dim)'">+ add</button>` : ''}
     </div>`;
   }).join('');
 }
@@ -1338,11 +1347,15 @@ function renderGameOver() {
   document.getElementById('winnerName').textContent = players[winnerId]?.name ?? 'Nobody';
 
   document.getElementById('finalScores').innerHTML = order.map(pid => {
-    const p = players[pid] ?? {};
-    const w = pid === winnerId;
-    return `<div class="score-row">
-      <span style="color:${w ? '#ede9e3' : '#4a4a4a'};font-weight:${w ? '600' : '400'}">${p.name ?? '?'}${w ? ' ◆' : ''}</span>
-      <span style="color:#c0182b;letter-spacing:.1em;font-weight:700">${p.letters || '—'}</span>
+    const p      = players[pid] ?? {};
+    const w      = pid === winnerId;
+    const canAdd = currentUser && pid !== me.id;
+    return `<div class="score-row" style="align-items:center;">
+      <span style="color:${w ? '#ede9e3' : '#4a4a4a'};font-weight:${w ? '600' : '400'};flex:1;">${p.name ?? '?'}${w ? ' ◆' : ''}</span>
+      <span style="color:#c0182b;letter-spacing:.1em;font-weight:700;margin-right:${canAdd ? '10px' : '0'}">${p.letters || '—'}</span>
+      ${canAdd ? `<button data-add-friend="${escHtml(p.name ?? '')}"
+        style="background:none;border:1px solid var(--bd2);color:var(--dim);font-size:0.54rem;font-weight:600;letter-spacing:0.12em;text-transform:uppercase;cursor:pointer;font-family:inherit;padding:4px 8px;white-space:nowrap;"
+        onmouseover="this.style.borderColor='var(--ok)';this.style.color='var(--ok)'" onmouseout="this.style.borderColor='var(--bd2)';this.style.color='var(--dim)'">+ Add</button>` : ''}
     </div>`;
   }).join('');
 
@@ -1662,6 +1675,62 @@ async function removeFriend(friendUid) {
 }
 
 // ============================================================
+//  Toast notification
+// ============================================================
+let _toastTimer = null;
+function showToast(msg, type = 'ok') {
+  const toast = document.getElementById('toast');
+  if (!toast) return;
+  clearTimeout(_toastTimer);
+  toast.textContent = msg;
+  if (type === 'err') {
+    toast.style.background = 'rgba(192,24,43,0.96)';
+    toast.style.color = '#fff';
+  } else if (type === 'dim') {
+    toast.style.background = '#1a1a1a';
+    toast.style.color = 'var(--dim)';
+  } else {
+    toast.style.background = 'rgba(44,160,100,0.96)';
+    toast.style.color = '#fff';
+  }
+  toast.style.display = 'block';
+  toast.style.opacity = '1';
+  _toastTimer = setTimeout(() => {
+    toast.style.opacity = '0';
+    setTimeout(() => { toast.style.display = 'none'; }, 260);
+  }, 2800);
+}
+
+// ============================================================
+//  In-game friend request (by game name lookup)
+// ============================================================
+async function addFriendInGame(playerName) {
+  if (!currentUser || !db) { showToast('Sign in to add friends', 'err'); return; }
+  const name = (playerName ?? '').trim();
+  if (!name) return;
+  showToast('Sending request…', 'dim');
+  try {
+    const snap = await db.ref(`usernames/${name.toLowerCase()}`).once('value');
+    if (!snap.exists()) {
+      showToast(`${name} isn't signed in — they can't receive requests yet`, 'err');
+      return;
+    }
+    const targetUid = snap.val();
+    if (targetUid === currentUser.uid) { showToast("That's you!", 'err'); return; }
+    const alreadySnap = await db.ref(`users/${currentUser.uid}/friends/${targetUid}`).once('value');
+    if (alreadySnap.exists()) { showToast(`Already friends with ${name}!`, 'ok'); return; }
+    const pendSnap = await db.ref(`users/${targetUid}/friendRequests/${currentUser.uid}`).once('value');
+    if (pendSnap.exists()) { showToast('Request already sent', 'dim'); return; }
+    const myNameSnap = await db.ref(`users/${currentUser.uid}/gameName`).once('value');
+    const myName = myNameSnap.val() ?? currentUser.displayName ?? 'Unknown';
+    await db.ref(`users/${targetUid}/friendRequests/${currentUser.uid}`).set({ name: myName, sentAt: Date.now() });
+    showToast(`Friend request sent to ${name}!`, 'ok');
+  } catch (_) {
+    showToast('Something went wrong — try again', 'err');
+  }
+}
+
+// ============================================================
 //  Practice mode
 // ============================================================
 function enterPractice() {
@@ -1828,6 +1897,13 @@ async function endPractice() {
 // Auth — landing
 document.getElementById('googleSignInBtn').addEventListener('click', signInWithGoogle);
 document.getElementById('accountBtn').addEventListener('click', showAccount);
+document.getElementById('landingSignOutBtn').addEventListener('click', signOutUser);
+
+// Delegated: "+ Add friend" buttons anywhere in the game (lobby, score cards, final scores)
+document.body.addEventListener('click', e => {
+  const el = e.target.closest('[data-add-friend]');
+  if (el) addFriendInGame(el.dataset.addFriend);
+});
 
 // Account page
 document.getElementById('accountBackBtn').addEventListener('click', () => {
