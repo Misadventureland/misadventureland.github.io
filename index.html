@@ -420,6 +420,109 @@
       border-bottom: 1px solid rgba(255,255,255,0.05);
       font-size: 0.9rem;
     }
+
+    /* ── Invite-mode: focused join layout ── */
+    body.invite-mode #createBtn,
+    body.invite-mode .divider { display: none !important; }
+
+    /* ── Round Chooser ── */
+    #roundChooser {
+      display: none;
+      text-align: center;
+      margin-bottom: 16px;
+      padding: 18px 16px;
+      background: rgba(201,162,39,0.06);
+      border: 1px solid rgba(201,162,39,0.2);
+      border-radius: 5px;
+    }
+    #roundChooserPrompt { font-size: 0.92rem; color: #e0d8cc; margin-bottom: 0; }
+    .round-chooser-btns {
+      display: flex; gap: 12px; justify-content: center; margin-top: 14px;
+    }
+    .round-chooser-btns .btn { width: auto; padding: 12px 28px; }
+    .round-chooser-btns .btn-outline { margin-top: 0; }
+
+    /* ── Chat ── */
+    .chat-section {
+      margin-top: 22px;
+      padding-top: 16px;
+      border-top: 1px solid rgba(255,255,255,0.06);
+    }
+    .chat-label {
+      font-size: 0.65rem;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: #444;
+      margin-bottom: 8px;
+    }
+    .chat-messages {
+      max-height: 140px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+      margin-bottom: 10px;
+    }
+    .chat-msg { font-size: 0.82rem; color: #777; line-height: 1.45; word-break: break-word; }
+    .chat-msg .chat-name { color: #c9a227; font-weight: bold; margin-right: 5px; }
+    .chat-msg.mine .chat-name { color: #4db87a; }
+    .chat-input-row { display: flex; gap: 8px; }
+    .chat-input-row input { flex: 1; font-size: 0.9rem; padding: 9px 12px; }
+    .chat-send-btn { width: auto; padding: 9px 14px; margin-top: 0; font-size: 0.75rem; }
+
+    /* ── Lightbox ── */
+    #lightbox {
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.92);
+      z-index: 1000;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+    }
+    #lightbox.open { display: flex; }
+    #lightboxImg {
+      max-width: 82vw;
+      max-height: 84vh;
+      border-radius: 8px;
+      object-fit: contain;
+      box-shadow: 0 16px 80px rgba(0,0,0,0.95);
+    }
+    .chain-thumb.round,
+    .chain-log-thumb.round {
+      cursor: pointer;
+      transition: opacity 0.15s, transform 0.15s;
+    }
+    .chain-thumb.round:hover,
+    .chain-log-thumb.round:hover { opacity: 0.75; transform: scale(1.12); }
+
+    /* ── Challenge Result Overlay ── */
+    #challengeOverlay {
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.9);
+      z-index: 900;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      text-align: center;
+      padding: 32px 24px;
+      cursor: pointer;
+    }
+    #challengeOverlay.open { display: flex; }
+    .co-icon { font-size: 3.5rem; margin-bottom: 14px; }
+    .co-title { font-size: 1.75rem; color: #c9a227; letter-spacing: 0.05em; margin-bottom: 10px; }
+    .co-sub { font-size: 0.95rem; color: #888; line-height: 1.8; max-width: 360px; }
+    .co-answer {
+      margin-top: 18px;
+      padding: 10px 24px;
+      background: rgba(255,255,255,0.04);
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 5px;
+      font-size: 0.95rem;
+      color: #e0d8cc;
+    }
+    .co-dismiss { margin-top: 24px; font-size: 0.68rem; color: #333; letter-spacing: 0.14em; text-transform: uppercase; }
   </style>
 </head>
 <body>
@@ -492,6 +595,15 @@
     <div style="color:#333;font-size:.85rem;">The chain will appear here&hellip;</div>
   </div>
 
+  <!-- ── Round Chooser ── shown after someone gets a letter ── -->
+  <div id="roundChooser">
+    <p id="roundChooserPrompt"></p>
+    <div class="round-chooser-btns" id="roundChooserBtns">
+      <button class="btn btn-gold" id="pickMovieBtn">🎬 Movie</button>
+      <button class="btn btn-outline" id="pickActorBtn">⭐ Actor</button>
+    </div>
+  </div>
+
   <!-- ── Challenge UI ───────────────────────────────────────── -->
 
   <!-- Challenge button — shown to any player who can issue a challenge -->
@@ -559,6 +671,16 @@
   </div>
 
   <div class="scores" id="scores"></div>
+
+  <!-- Chat -->
+  <div class="chat-section">
+    <div class="chat-label">Chat</div>
+    <div class="chat-messages" id="chatMessages"></div>
+    <div class="chat-input-row">
+      <input type="text" id="chatInput" placeholder="Say something…" maxlength="120" autocomplete="off">
+      <button class="btn btn-outline chat-send-btn" id="chatSendBtn">Send</button>
+    </div>
+  </div>
 </div>
 
 <!-- ══ GAME OVER ════════════════════════════════════ -->
@@ -583,6 +705,20 @@
   </div>
 
   <button class="btn btn-gold" id="playAgainBtn" style="margin-top:16px;">Play Again</button>
+</div>
+
+<!-- Lightbox -->
+<div id="lightbox">
+  <img id="lightboxImg" src="" alt="">
+</div>
+
+<!-- Challenge Result Overlay -->
+<div id="challengeOverlay">
+  <div class="co-icon" id="coIcon"></div>
+  <div class="co-title" id="coTitle"></div>
+  <div class="co-sub" id="coSub"></div>
+  <div class="co-answer" id="coAnswer"></div>
+  <div class="co-dismiss">Tap anywhere to dismiss</div>
 </div>
 
 <!-- Firebase Realtime Database SDK (compat) -->

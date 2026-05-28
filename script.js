@@ -49,6 +49,9 @@ let selectedSuggestion        = null;   // autocomplete pick for main input
 let selectedChallengeSuggestion = null; // autocomplete pick for challenge input
 let submitting                = false;
 let challengeSubmitting       = false;
+let lastSeenChallengeTs       = 0;
+let chatAttached              = false;
+let overlayTimer              = null;
 
 // ============================================================
 //  Utilities
@@ -133,7 +136,7 @@ async function fetchSuggestionsFor(query, direction, suggestionsId, onSelect) {
       results = (data.results ?? []).slice(0, 6).map(p => ({
         tmdbId: p.id, name: p.name, type: 'actor',
         imagePath: p.profile_path ?? null,
-        sub: (p.known_for ?? []).map(m => m.title || m.name).filter(Boolean).slice(0, 2).join(', ')
+        sub: ''
       }));
     } else {
       const data = await tmdbFetch('/search/movie', { query, language: 'en-US' });
@@ -182,7 +185,8 @@ function clearSuggestionsEl(id) {
 // Determine search direction for main input based on chain state
 function mainDirection() {
   const last = roomSnap?.lastChainItem;
-  return (!last || last.type === 'actor') ? 'movie' : 'actor';
+  if (!last) return (roomSnap?.roundStartType === 'actor') ? 'actor' : 'movie';
+  return last.type === 'actor' ? 'movie' : 'actor';
 }
 
 // Determine search direction for challenge input based on challenge state
@@ -193,7 +197,21 @@ function challengeDirection() {
 // ============================================================
 //  Answer validation (main game)
 // ============================================================
-async function validateAnswer(input, lastItem, usedMovies, usedActors, preSelected = null) {
+async function validateAnswer(input, lastItem, usedMovies, usedActors, preSelected = null, roundStartType = null) {
+  // Actor-first round: no chain yet, chooser picked "actor"
+  if (!lastItem && roundStartType === 'actor') {
+    let personId, personName, imagePath;
+    if (preSelected) {
+      personId = preSelected.tmdbId; personName = preSelected.name; imagePath = preSelected.imagePath;
+    } else {
+      const p = await searchPerson(input);
+      if (!p) return { valid: false, error: `Can't find an actor named "${input}"` };
+      personId = p.id; personName = p.name; imagePath = p.profile_path ?? null;
+    }
+    if (usedActors?.[personId]) return { valid: false, error: `${personName} was already used` };
+    return { valid: true, name: personName, tmdbId: personId, type: 'actor', imagePath };
+  }
+
   if (!lastItem) {
     const movie = preSelected
       ? { id: preSelected.tmdbId, title: preSelected.name, poster_path: preSelected.imagePath }
@@ -335,6 +353,7 @@ function attachListener() {
     roomSnap = snap.val();
     onRoomChange();
   });
+  attachChatListener();
 }
 
 function onRoomChange() {
@@ -423,27 +442,52 @@ async function shareInviteLink() {
 function renderGame() {
   if (!roomSnap) return;
 
-  const order     = toArray(roomSnap.playerOrder);
-  const players   = roomSnap.players ?? {};
-  const curPid    = order[roomSnap.currentIdx];
-  const curPlayer = players[curPid] ?? {};
-  const challenge = roomSnap.challenge ?? null;
-  const pending   = roomSnap.pendingChallenge ?? null;
-  const myData    = players[me.id] ?? {};
+  const order           = toArray(roomSnap.playerOrder);
+  const players         = roomSnap.players ?? {};
+  const curPid          = order[roomSnap.currentIdx];
+  const curPlayer       = players[curPid] ?? {};
+  const challenge       = roomSnap.challenge ?? null;
+  const pending         = roomSnap.pendingChallenge ?? null;
+  const myData          = players[me.id] ?? {};
+  const roundChooserPid = roomSnap.roundChooserPid ?? null;
+  const roundStartType  = roomSnap.roundStartType  ?? null;
 
   document.getElementById('turnName').textContent = curPlayer.name ?? '?';
   renderChain();
   renderScores(order, players, curPid);
   renderChallengeUI(challenge, pending, players, myData);
 
-  // If a challenge is active, hide normal turn input for everyone
+  // Check for new challenge result overlay
+  const cr = roomSnap.lastChallengeResult;
+  if (cr && cr.ts > lastSeenChallengeTs) {
+    lastSeenChallengeTs = cr.ts;
+    showChallengeOverlay(cr);
+  }
+
+  // Challenge active — everyone waits
   if (challenge) {
-    document.getElementById('activeInput').style.display  = 'none';
-    document.getElementById('waitingPanel').style.display = 'none';
+    document.getElementById('roundChooser').style.display  = 'none';
+    document.getElementById('activeInput').style.display   = 'none';
+    document.getElementById('waitingPanel').style.display  = 'none';
     return;
   }
 
-  // Normal turn logic
+  // Round chooser: letter-getter picks Movie or Actor to start new round
+  if (roundChooserPid && !roundStartType) {
+    document.getElementById('roundChooser').style.display  = 'block';
+    document.getElementById('activeInput').style.display   = 'none';
+    document.getElementById('waitingPanel').style.display  = 'none';
+    const chooserName = players[roundChooserPid]?.name ?? '?';
+    const amChooser   = roundChooserPid === me.id;
+    document.getElementById('roundChooserPrompt').textContent =
+      amChooser ? 'You got a letter — pick how to start the new round:'
+                : `${chooserName} is picking how to start the new round…`;
+    document.getElementById('roundChooserBtns').style.display = amChooser ? 'flex' : 'none';
+    return;
+  }
+  document.getElementById('roundChooser').style.display = 'none';
+
+  // Eliminated player — just watch
   if (myData.out) {
     document.getElementById('activeInput').style.display  = 'none';
     document.getElementById('waitingPanel').style.display = 'block';
@@ -520,24 +564,37 @@ function renderChain() {
     const cur   = i === arr.length - 1;
     const actor = item.type === 'actor';
     const img   = item.imagePath ? tmdbImg(item.imagePath) : null;
+    const fullImg = (actor && item.imagePath) ? tmdbImg(item.imagePath, 'w500') : '';
     return `<div class="chain-item ${cur ? 'current' : ''}">
-      ${img ? `<img class="chain-thumb ${actor ? 'round' : ''}" src="${img}" alt="${item.name}" loading="lazy">`
-            : `<div class="chain-thumb ${actor ? 'round' : ''}"></div>`}
+      ${img
+        ? `<img class="chain-thumb ${actor ? 'round' : ''}" src="${img}" alt="${item.name}" loading="lazy"
+             ${actor ? `data-fullimg="${fullImg}" data-name="${item.name}"` : ''}>`
+        : `<div class="chain-thumb ${actor ? 'round' : ''}"></div>`}
       <div class="chain-item-text">
         <div class="chain-item-label">${actor ? '⭐ Actor' : '🎬 Movie'}</div>
         <div class="chain-item-name">${item.name}</div>
       </div>
     </div>`;
   }).join('');
+
+  el.querySelectorAll('.chain-thumb.round[data-fullimg]').forEach(img => {
+    img.addEventListener('click', () => openLightbox(img.dataset.fullimg, img.dataset.name));
+  });
 }
 
 function renderPrompt() {
   const last = roomSnap.lastChainItem;
+  const rst  = roomSnap.roundStartType ?? null;
   const el   = document.getElementById('gamePrompt');
   const inp  = document.getElementById('answerInput');
   if (!last) {
-    el.innerHTML    = 'Name any <strong>movie</strong> to start the chain';
-    inp.placeholder = 'Movie title…';
+    if (rst === 'actor') {
+      el.innerHTML    = 'Name any <strong>actor</strong> to start the chain';
+      inp.placeholder = 'Actor name…';
+    } else {
+      el.innerHTML    = 'Name any <strong>movie</strong> to start the chain';
+      inp.placeholder = 'Movie title…';
+    }
   } else if (last.type === 'movie') {
     el.innerHTML    = `Name an <strong>actor</strong> from <strong>${last.name}</strong>`;
     inp.placeholder = 'Actor name…';
@@ -586,7 +643,7 @@ async function handleSubmit() {
   clearSuggestionsEl('suggestions');
 
   try {
-    const result = await validateAnswer(answer, roomSnap.lastChainItem, roomSnap.usedMovies, roomSnap.usedActors, picked);
+    const result = await validateAnswer(answer, roomSnap.lastChainItem, roomSnap.usedMovies, roomSnap.usedActors, picked, roomSnap.roundStartType ?? null);
     if (result.valid) {
       setFeedback('feedback', `✓ ${result.name}`, 'ok');
       await advanceChain(result);
@@ -631,7 +688,9 @@ async function advanceChain(result) {
     currentAttempts:  0,
     currentIdx:       nextIdx,
     pendingChallenge: pending,
-    challenge:        null   // clear any stale challenge
+    challenge:        null,
+    roundChooserPid:  null,
+    roundStartType:   null
   });
 }
 
@@ -678,7 +737,7 @@ async function handleChallengeSubmit() {
     if (result.valid) {
       // Challenged player proved it → challenger gets the letter
       setFeedback('challengeFeedback', `✓ ${result.name} — ${roomSnap.players?.[challenge.challengerId]?.name ?? 'Challenger'} gets the letter!`, 'ok');
-      await resolveChallenge(challenge.challengerId);
+      await resolveChallenge(challenge.challengerId, result.name);
     } else {
       setFeedback('challengeFeedback', result.error, 'err');
       // Give them a moment to read the error, then they must give up or try again
@@ -693,9 +752,30 @@ async function handleChallengeSubmit() {
   document.getElementById('challengeSubmitBtn').disabled = false;
 }
 
-async function resolveChallenge(loserPid) {
-  // loserPid gets a letter; then clear the challenge and continue the game
-  await roomRef.update({ challenge: null, pendingChallenge: null });
+async function resolveChallenge(loserPid, winningAnswer = null) {
+  const challenge = roomSnap?.challenge;
+  const players   = roomSnap?.players ?? {};
+
+  if (challenge) {
+    const winnerPid   = loserPid === challenge.challengerId ? challenge.challengedId : challenge.challengerId;
+    const loserName   = players[loserPid]?.name  ?? '?';
+    const winnerName  = players[winnerPid]?.name ?? '?';
+    const loserLetter = WORD[(players[loserPid]?.letters ?? '').length] ?? '?';
+
+    await roomRef.update({
+      challenge:           null,
+      pendingChallenge:    null,
+      lastChallengeResult: {
+        winnerPid, loserPid,
+        loserName, loserLetter,
+        winnerName,
+        winningAnswer: winningAnswer ?? null,
+        ts: Date.now()
+      }
+    });
+  } else {
+    await roomRef.update({ challenge: null, pendingChallenge: null });
+  }
   await assignLetterAndPass(loserPid);
 }
 
@@ -727,14 +807,22 @@ async function assignLetterAndPass(pid) {
     updates.status = 'finished';
     updates.winner = stillIn[0] ?? null;
   } else {
-    // If the loser was the current player, advance the turn
-    const curPid = order[roomSnap.currentIdx];
-    if (curPid === pid || isOut) {
-      updates.currentIdx = nextActiveIndex(roomSnap.currentIdx, updatedPlayers);
-    }
+    // Round restart: clear the chain, let the letter-getter pick the starting type
+    const chooserIdx = order.indexOf(pid);
+    updates.roundChooserPid  = pid;
+    updates.roundStartType   = null;
+    updates.lastChainItem    = null;
+    updates.log              = {};
+    updates.currentIdx       = chooserIdx >= 0 ? chooserIdx : 0;
+    updates.pendingChallenge = null;
   }
 
   await roomRef.update(updates);
+}
+
+async function handleRoundStartChoice(type) {
+  if (!roomSnap || roomSnap.roundChooserPid !== me.id) return;
+  await roomRef.update({ roundStartType: type });
 }
 
 async function leaveGame() {
@@ -764,7 +852,8 @@ async function leaveGame() {
 
   await roomRef.update(updates);
   if (listener) roomRef.off('value', listener);
-  listener = null; roomSnap = null;
+  listener = null; roomSnap = null; chatAttached = false;
+  document.getElementById('chatMessages').innerHTML = '';
   showScreen('screen-landing');
 }
 
@@ -799,15 +888,119 @@ function renderGameOver() {
 
   const entries = Object.values(roomSnap.log ?? {});
   document.getElementById('chainLen').textContent = entries.length;
-  document.getElementById('finalChain').innerHTML = entries.map(item => {
-    const actor = item.type === 'actor';
-    const img   = item.imagePath ? tmdbImg(item.imagePath) : null;
+  const finalChainEl = document.getElementById('finalChain');
+  finalChainEl.innerHTML = entries.map(item => {
+    const actor   = item.type === 'actor';
+    const img     = item.imagePath ? tmdbImg(item.imagePath) : null;
+    const fullImg = (actor && item.imagePath) ? tmdbImg(item.imagePath, 'w500') : '';
     return `<div class="chain-log-item">
-      ${img ? `<img class="chain-log-thumb ${actor ? 'round' : ''}" src="${img}" alt="" loading="lazy">`
-            : `<span class="icon">${actor ? '⭐' : '🎬'}</span>`}
+      ${img
+        ? `<img class="chain-log-thumb ${actor ? 'round' : ''}" src="${img}" alt="" loading="lazy"
+             ${actor ? `data-fullimg="${fullImg}" data-name="${item.name}"` : ''}>`
+        : `<span class="icon">${actor ? '⭐' : '🎬'}</span>`}
       <span>${item.name}</span>
     </div>`;
   }).join('');
+
+  finalChainEl.querySelectorAll('.chain-log-thumb.round[data-fullimg]').forEach(img => {
+    img.addEventListener('click', () => openLightbox(img.dataset.fullimg, img.dataset.name));
+  });
+}
+
+// ============================================================
+//  Lightbox
+// ============================================================
+function openLightbox(src, name) {
+  const img = document.getElementById('lightboxImg');
+  img.src = src;
+  img.alt = name ?? '';
+  document.getElementById('lightbox').classList.add('open');
+}
+
+function closeLightbox() {
+  document.getElementById('lightbox').classList.remove('open');
+}
+
+// ============================================================
+//  Challenge result overlay
+// ============================================================
+function showChallengeOverlay(r) {
+  const iWon  = r.winnerPid === me.id;
+  const iLost = r.loserPid  === me.id;
+
+  document.getElementById('coIcon').textContent  = iWon ? '🏆' : iLost ? '💀' : '⚡';
+  document.getElementById('coTitle').textContent = iWon  ? 'Challenge Won!'   :
+                                                   iLost ? 'Challenge Lost'   :
+                                                           'Challenge Over';
+  let sub;
+  if (iWon) {
+    sub = `<strong style="color:#e0d8cc">${r.loserName}</strong> received the letter ` +
+          `<strong style="color:#d45c5c">${r.loserLetter}</strong>`;
+  } else if (iLost) {
+    sub = r.winningAnswer
+      ? `<strong style="color:#e0d8cc">${r.winnerName}</strong> proved it`
+      : `You couldn't prove the connection`;
+  } else {
+    sub = `<strong style="color:#c9a227">${r.winnerName}</strong> won — ` +
+          `<strong style="color:#e0d8cc">${r.loserName}</strong> received ` +
+          `<strong style="color:#d45c5c">${r.loserLetter}</strong>`;
+  }
+  document.getElementById('coSub').innerHTML = sub;
+
+  const answerEl = document.getElementById('coAnswer');
+  if (r.winningAnswer) {
+    answerEl.textContent   = `"${r.winningAnswer}"`;
+    answerEl.style.display = 'block';
+  } else {
+    answerEl.style.display = 'none';
+  }
+
+  document.getElementById('challengeOverlay').classList.add('open');
+  clearTimeout(overlayTimer);
+  overlayTimer = setTimeout(closeChallengeOverlay, 5000);
+}
+
+function closeChallengeOverlay() {
+  document.getElementById('challengeOverlay').classList.remove('open');
+  clearTimeout(overlayTimer);
+}
+
+// ============================================================
+//  Chat
+// ============================================================
+function attachChatListener() {
+  if (!roomRef || chatAttached) return;
+  chatAttached = true;
+  roomRef.child('chat').on('child_added', snap => {
+    const msg = snap.val();
+    if (!msg) return;
+    appendChatMessage(msg);
+  });
+}
+
+function appendChatMessage(msg) {
+  const el = document.getElementById('chatMessages');
+  if (!el) return;
+  const div = document.createElement('div');
+  div.className = `chat-msg ${msg.name === me.name ? 'mine' : ''}`;
+  div.innerHTML = `<span class="chat-name">${escHtml(msg.name)}</span>${escHtml(msg.text)}`;
+  el.appendChild(div);
+  el.scrollTop = el.scrollHeight;
+}
+
+function escHtml(str) {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+async function sendChat() {
+  const input = document.getElementById('chatInput');
+  const text  = input.value.trim();
+  if (!text || !roomRef) return;
+  input.value = '';
+  await roomRef.child('chat').push({ name: me.name, text, ts: Date.now() });
 }
 
 // ============================================================
@@ -910,6 +1103,22 @@ document.getElementById('leaveBtn').addEventListener('click', () => {
   leaveGame();
 });
 
+// Round chooser
+document.getElementById('pickMovieBtn').addEventListener('click', () => handleRoundStartChoice('movie'));
+document.getElementById('pickActorBtn').addEventListener('click', () => handleRoundStartChoice('actor'));
+
+// Chat
+document.getElementById('chatSendBtn').addEventListener('click', sendChat);
+document.getElementById('chatInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter') sendChat();
+});
+
+// Lightbox
+document.getElementById('lightbox').addEventListener('click', closeLightbox);
+
+// Challenge result overlay
+document.getElementById('challengeOverlay').addEventListener('click', closeChallengeOverlay);
+
 // Close suggestions when clicking outside an input-wrap
 document.addEventListener('click', e => {
   if (!e.target.closest('.input-wrap')) {
@@ -922,6 +1131,8 @@ document.addEventListener('click', e => {
 document.getElementById('playAgainBtn').addEventListener('click', () => {
   if (listener) roomRef.off('value', listener);
   roomSnap = null; roomId = null; roomRef = null; isHost = false; listener = null;
+  chatAttached = false; lastSeenChallengeTs = 0;
+  document.getElementById('chatMessages').innerHTML = '';
   setFeedback('feedback', '', '');
   document.getElementById('playerName').value = me.name ?? '';
   showScreen('screen-landing');
@@ -936,8 +1147,9 @@ window.addEventListener('DOMContentLoaded', () => {
   if (invite && /^[A-Z0-9]{4}$/i.test(invite)) {
     const codeEl = document.getElementById('joinCode');
     codeEl.value = invite.toUpperCase();
-    // Highlight the join section so they notice it's pre-filled
     codeEl.style.borderColor = '#c9a227';
-    document.getElementById('joinCode').scrollIntoView({ behavior: 'smooth', block: 'center' });
+    // Focused invite-join mode: hide "Create Game" option, focus name field
+    document.body.classList.add('invite-mode');
+    document.getElementById('playerName').focus();
   }
 });
