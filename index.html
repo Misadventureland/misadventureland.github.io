@@ -604,6 +604,27 @@
     </div>
   </div>
 
+  <!-- Friends section — signed-in only -->
+  <div id="friendsSection" style="display:none;margin-bottom:10px;">
+    <!-- Pending requests (hidden when empty) -->
+    <div class="card" id="friendRequestsCard" style="display:none;margin-bottom:10px;border-left:2px solid var(--red);">
+      <label style="color:var(--red);">Friend Requests</label>
+      <div id="friendRequestsList"></div>
+    </div>
+    <!-- Friends list + add friend -->
+    <div class="card">
+      <label>Friends (<span id="friendCount">0</span>)</label>
+      <div id="friendsList" style="min-height:10px;margin-bottom:14px;"></div>
+      <div style="border-top:1px solid var(--bd);padding-top:14px;">
+        <div class="input-row" style="gap:8px;">
+          <input type="text" id="addFriendInput" placeholder="Find by game name…" maxlength="20" autocomplete="off">
+          <button class="btn btn-outline" id="addFriendBtn" style="width:auto;padding:10px 14px;margin-top:0;font-size:0.65rem;letter-spacing:0.14em;">Add</button>
+        </div>
+        <p id="addFriendFeedback" style="font-size:0.72rem;min-height:18px;margin-top:8px;letter-spacing:0.03em;"></p>
+      </div>
+    </div>
+  </div>
+
   <div class="card">
     <label for="playerName">Your Name</label>
     <input type="text" id="playerName" placeholder="Enter your name" maxlength="20" autocomplete="off">
@@ -619,6 +640,10 @@
            autocomplete="off" spellcheck="false"
            style="text-transform:uppercase;letter-spacing:0.4em;font-size:1.5rem;text-align:center;">
     <button class="btn btn-outline" id="joinBtn">Join Game</button>
+  </div>
+
+  <div style="text-align:center;margin-top:20px;">
+    <button id="practiceBtn" style="background:none;border:none;color:var(--dim);font-size:0.68rem;font-weight:500;letter-spacing:0.16em;cursor:pointer;font-family:inherit;text-transform:uppercase;padding:8px;">Solo Practice</button>
   </div>
 </div>
 
@@ -776,6 +801,70 @@
   </div>
 
   <button class="btn btn-gold" id="playAgainBtn" style="margin-top:16px;">Play Again</button>
+</div>
+
+<!-- ══ PRACTICE ═══════════════════════════════════════ -->
+<div id="screen-practice" class="screen">
+  <div class="game-topbar">
+    <div>
+      <div class="turn-label">Solo Practice</div>
+      <div class="turn-name" id="practiceChainCount">Chain: 0</div>
+    </div>
+    <div style="text-align:right;">
+      <button id="endPracticeBtn" style="background:none;border:none;color:var(--dim);font-size:0.62rem;letter-spacing:0.14em;cursor:pointer;font-family:inherit;text-transform:uppercase;padding:0;font-weight:500;">End</button>
+    </div>
+  </div>
+
+  <div class="chain-box" id="practiceChainBox">
+    <div style="color:var(--dim);font-size:.85rem;">The chain will appear here&hellip;</div>
+  </div>
+
+  <!-- Type picker — shown before first move -->
+  <div id="practiceStartPicker" style="text-align:center;margin-bottom:20px;padding:20px;background:var(--s1);border:1px solid var(--bd);border-left:2px solid var(--red);">
+    <p style="font-size:0.85rem;color:var(--text);margin-bottom:16px;">How do you want to start?</p>
+    <div style="display:flex;gap:10px;justify-content:center;">
+      <button class="btn btn-gold" id="practiceStartMovieBtn" style="width:auto;padding:12px 28px;">🎬 Movie</button>
+      <button class="btn btn-outline" id="practiceStartActorBtn" style="width:auto;padding:12px 28px;margin-top:0;">⭐ Actor</button>
+    </div>
+  </div>
+
+  <!-- Main input — shown after type is chosen -->
+  <div id="practiceMain" style="display:none;">
+    <p class="prompt" id="practicePrompt"></p>
+    <div class="dots">
+      <div class="dot" id="pd0"></div>
+      <div class="dot" id="pd1"></div>
+      <div class="dot" id="pd2"></div>
+    </div>
+    <div class="input-wrap">
+      <div class="input-row">
+        <input type="text" id="practiceInput" placeholder="Type your answer&hellip;" autocomplete="off" spellcheck="false">
+        <button class="btn btn-gold" id="practiceSubmitBtn" style="width:auto;padding:11px 18px;">Submit</button>
+      </div>
+      <div class="suggestions" id="practiceSuggestions"></div>
+    </div>
+    <div class="feedback" id="practiceFeedback"></div>
+  </div>
+</div>
+
+<!-- ══ PRACTICE OVER ══════════════════════════════════ -->
+<div id="screen-practiceOver" class="screen">
+  <h1>The Movie Game</h1>
+  <p class="subtitle">Practice Over</p>
+
+  <div class="card" style="text-align:center;">
+    <p style="font-size:.6rem;font-weight:600;letter-spacing:.22em;text-transform:uppercase;color:var(--dim);">Chain Length</p>
+    <p class="winner-name" id="practiceScore">0</p>
+    <p id="practiceBestLabel" style="font-size:.72rem;color:var(--dim);letter-spacing:.06em;margin-top:4px;"></p>
+  </div>
+
+  <div class="card">
+    <label>Your Chain (<span id="practiceChainLen">0</span> links)</label>
+    <div class="chain-log" id="practiceChainLog"></div>
+  </div>
+
+  <button class="btn btn-gold" id="practiceTryAgainBtn" style="margin-top:16px;">Try Again</button>
+  <button class="btn btn-outline" id="practiceBackBtn">Back to Menu</button>
 </div>
 
 <!-- Lightbox -->

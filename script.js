@@ -115,6 +115,15 @@ let currentUser       = null;
 let gameStatsWritten  = false;
 let lastLogLength     = -1;   // -1 = haven't entered game yet; tracks chain length for ding
 
+// Practice mode (all local — no Firebase room)
+let practiceChain      = [];
+let practiceUsedMovies = {};
+let practiceUsedActors = {};
+let practiceAttempts   = 0;
+let practiceLastItem   = null;
+let practiceStartType  = 'movie';
+let practiceSelected   = null;
+
 // ============================================================
 //  Utilities
 // ============================================================
@@ -272,8 +281,17 @@ async function signOutUser() {
 async function saveGameName(name) {
   const trimmed = name.trim().slice(0, 20);
   if (!currentUser || !db || !trimmed) return;
-  await db.ref(`users/${currentUser.uid}/gameName`).set(trimmed);
-  // Keep the main name input in sync
+  // Read old name so we can remove the stale username index entry
+  const oldSnap  = await db.ref(`users/${currentUser.uid}/gameName`).once('value');
+  const oldName  = oldSnap.val();
+  const ops = [
+    db.ref(`users/${currentUser.uid}/gameName`).set(trimmed),
+    db.ref(`usernames/${trimmed.toLowerCase()}`).set(currentUser.uid)
+  ];
+  if (oldName && oldName.toLowerCase() !== trimmed.toLowerCase()) {
+    ops.push(db.ref(`usernames/${oldName.toLowerCase()}`).remove());
+  }
+  await Promise.all(ops);
   const nameInput = document.getElementById('playerName');
   if (nameInput) nameInput.value = trimmed;
 }
@@ -324,6 +342,11 @@ async function updateAuthUI() {
         if (!cur || cur === currentUser.displayName) nameInput.value = gameName;
       }
 
+      // Auto-save Google display name as game name on first sign-in
+      if (!stats?.gameName && currentUser.displayName) {
+        saveGameName(currentUser.displayName).catch(() => {});
+      }
+
       if (stats?.gamesPlayed) {
         const g = stats.gamesPlayed;
         const w = stats.wins ?? 0;
@@ -339,6 +362,7 @@ async function updateAuthUI() {
       }
     }
   }
+  loadFriendsSection();
 }
 
 // ============================================================
@@ -1360,12 +1384,325 @@ async function sendChat() {
 }
 
 // ============================================================
+//  Friends
+// ============================================================
+async function loadFriendsSection() {
+  const section = document.getElementById('friendsSection');
+  if (!section) return;
+  if (!currentUser) { section.style.display = 'none'; return; }
+  section.style.display = 'block';
+  await Promise.all([renderFriendsList(), renderFriendRequests()]);
+}
+
+async function renderFriendsList() {
+  if (!currentUser || !db) return;
+  const snap    = await db.ref(`users/${currentUser.uid}/friends`).once('value');
+  const friends = snap.val() ?? {};
+  const entries = Object.entries(friends);
+  document.getElementById('friendCount').textContent = entries.length;
+  const el = document.getElementById('friendsList');
+  if (!entries.length) {
+    el.innerHTML = '<p style="font-size:0.78rem;color:var(--dim);padding:4px 0;">No friends yet — add one below</p>';
+    return;
+  }
+  el.innerHTML = entries.map(([fuid, d]) =>
+    `<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--bd);">
+       <span style="flex:1;font-size:0.88rem;">${escHtml(d.name ?? '?')}</span>
+       <button class="rm-friend-btn" data-uid="${fuid}"
+         style="background:none;border:none;color:var(--dim);font-size:0.6rem;letter-spacing:0.1em;text-transform:uppercase;cursor:pointer;font-family:inherit;padding:2px 0;">Remove</button>
+     </div>`
+  ).join('');
+  el.querySelectorAll('.rm-friend-btn').forEach(btn =>
+    btn.addEventListener('click', () => removeFriend(btn.dataset.uid))
+  );
+}
+
+async function renderFriendRequests() {
+  if (!currentUser || !db) return;
+  const snap     = await db.ref(`users/${currentUser.uid}/friendRequests`).once('value');
+  const requests = snap.val() ?? {};
+  const entries  = Object.entries(requests);
+  const card = document.getElementById('friendRequestsCard');
+  const list = document.getElementById('friendRequestsList');
+  if (!entries.length) { card.style.display = 'none'; return; }
+  card.style.display = 'block';
+  list.innerHTML = entries.map(([fuid, d]) =>
+    `<div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--bd);">
+       <span style="flex:1;font-size:0.88rem;">${escHtml(d.name ?? '?')}</span>
+       <button class="accept-req-btn" data-uid="${fuid}" data-name="${escHtml(d.name ?? '?')}"
+         style="background:var(--ok);color:#fff;border:none;padding:5px 10px;font-size:0.6rem;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;cursor:pointer;font-family:inherit;">Accept</button>
+       <button class="decline-req-btn" data-uid="${fuid}"
+         style="background:none;border:1px solid var(--bd2);color:var(--dim);padding:5px 10px;font-size:0.6rem;letter-spacing:0.1em;text-transform:uppercase;cursor:pointer;font-family:inherit;">Decline</button>
+     </div>`
+  ).join('');
+  list.querySelectorAll('.accept-req-btn').forEach(btn =>
+    btn.addEventListener('click', () => acceptFriendRequest(btn.dataset.uid, btn.dataset.name))
+  );
+  list.querySelectorAll('.decline-req-btn').forEach(btn =>
+    btn.addEventListener('click', () => declineFriendRequest(btn.dataset.uid))
+  );
+}
+
+async function sendFriendRequest() {
+  if (!currentUser || !db) return;
+  const input = document.getElementById('addFriendInput');
+  const fb    = document.getElementById('addFriendFeedback');
+  const name  = input.value.trim();
+  if (!name) return;
+  fb.style.color = 'var(--dim)';
+  fb.textContent = 'Looking up…';
+  try {
+    const snap = await db.ref(`usernames/${name.toLowerCase()}`).once('value');
+    if (!snap.exists()) { fb.style.color = 'var(--red)'; fb.textContent = 'No player found with that name'; return; }
+    const targetUid = snap.val();
+    if (targetUid === currentUser.uid) { fb.style.color = 'var(--red)'; fb.textContent = "That's you!"; return; }
+    const alreadySnap = await db.ref(`users/${currentUser.uid}/friends/${targetUid}`).once('value');
+    if (alreadySnap.exists()) { fb.style.color = 'var(--dim)'; fb.textContent = 'Already friends'; return; }
+    const myNameSnap  = await db.ref(`users/${currentUser.uid}/gameName`).once('value');
+    const myGameName  = myNameSnap.val() ?? currentUser.displayName ?? 'Unknown';
+    const theirNameSnap = await db.ref(`users/${targetUid}/gameName`).once('value');
+    const theirName   = theirNameSnap.val() ?? name;
+    await db.ref(`users/${targetUid}/friendRequests/${currentUser.uid}`).set({ name: myGameName, sentAt: Date.now() });
+    input.value = '';
+    fb.style.color = 'var(--ok)';
+    fb.textContent = `Request sent to ${theirName}!`;
+    setTimeout(() => { fb.textContent = ''; }, 3000);
+  } catch (_) { fb.style.color = 'var(--red)'; fb.textContent = 'Something went wrong — try again'; }
+}
+
+async function acceptFriendRequest(fromUid, fromName) {
+  if (!currentUser || !db) return;
+  const myNameSnap = await db.ref(`users/${currentUser.uid}/gameName`).once('value');
+  const myName     = myNameSnap.val() ?? currentUser.displayName ?? 'Unknown';
+  await Promise.all([
+    db.ref(`users/${currentUser.uid}/friends/${fromUid}`).set({ name: fromName, addedAt: Date.now() }),
+    db.ref(`users/${fromUid}/friends/${currentUser.uid}`).set({ name: myName, addedAt: Date.now() }),
+    db.ref(`users/${currentUser.uid}/friendRequests/${fromUid}`).remove()
+  ]);
+  await Promise.all([renderFriendsList(), renderFriendRequests()]);
+}
+
+async function declineFriendRequest(fromUid) {
+  if (!currentUser || !db) return;
+  await db.ref(`users/${currentUser.uid}/friendRequests/${fromUid}`).remove();
+  await renderFriendRequests();
+}
+
+async function removeFriend(friendUid) {
+  if (!currentUser || !db) return;
+  if (!confirm('Remove this friend?')) return;
+  await Promise.all([
+    db.ref(`users/${currentUser.uid}/friends/${friendUid}`).remove(),
+    db.ref(`users/${friendUid}/friends/${currentUser.uid}`).remove()
+  ]);
+  await renderFriendsList();
+}
+
+// ============================================================
+//  Practice mode
+// ============================================================
+function enterPractice() {
+  practiceChain      = [];
+  practiceUsedMovies = {};
+  practiceUsedActors = {};
+  practiceAttempts   = 0;
+  practiceLastItem   = null;
+  practiceSelected   = null;
+  document.getElementById('practiceChainBox').innerHTML =
+    '<div style="color:var(--dim);font-size:.85rem;">The chain will appear here…</div>';
+  document.getElementById('practiceChainCount').textContent = 'Chain: 0';
+  document.getElementById('practiceStartPicker').style.display = 'block';
+  document.getElementById('practiceMain').style.display = 'none';
+  setFeedback('practiceFeedback', '', '');
+  showScreen('screen-practice');
+}
+
+function beginPracticeWith(type) {
+  practiceStartType = type;
+  document.getElementById('practiceStartPicker').style.display = 'none';
+  document.getElementById('practiceMain').style.display = 'block';
+  renderPracticePrompt();
+  renderPracticeDots();
+  document.getElementById('practiceInput').value = '';
+  document.getElementById('practiceInput').focus();
+}
+
+function practiceDirection() {
+  if (!practiceLastItem) return practiceStartType;
+  return practiceLastItem.type === 'actor' ? 'movie' : 'actor';
+}
+
+async function handlePracticeSubmit() {
+  const input  = document.getElementById('practiceInput');
+  const answer = input.value.trim();
+  if (!answer) return;
+  document.getElementById('practiceSubmitBtn').disabled = true;
+  setFeedback('practiceFeedback', 'Checking…', '');
+  input.value = '';
+  const picked = practiceSelected;
+  practiceSelected = null;
+  clearSuggestionsEl('practiceSuggestions');
+  try {
+    const result = await validateAnswer(
+      answer, practiceLastItem,
+      practiceUsedMovies, practiceUsedActors,
+      picked, practiceLastItem ? null : practiceStartType
+    );
+    if (result.valid) {
+      if (result.type === 'movie') practiceUsedMovies[result.tmdbId] = true;
+      else                         practiceUsedActors[result.tmdbId] = true;
+      practiceLastItem = result;
+      practiceChain.push(result);
+      practiceAttempts = 0;
+      setFeedback('practiceFeedback', `✓ ${result.name}`, 'ok');
+      renderPracticeChain();
+      renderPracticePrompt();
+      renderPracticeDots();
+      document.getElementById('practiceChainCount').textContent = `Chain: ${practiceChain.length}`;
+      playDing();
+      document.getElementById('practiceInput').focus();
+    } else {
+      practiceAttempts++;
+      setFeedback('practiceFeedback', result.error, 'err');
+      renderPracticeDots();
+      if (practiceAttempts >= 3) setTimeout(endPractice, 900);
+    }
+  } catch (_) { setFeedback('practiceFeedback', 'Network error — try again', 'err'); }
+  document.getElementById('practiceSubmitBtn').disabled = false;
+}
+
+function renderPracticeChain() {
+  const el = document.getElementById('practiceChainBox');
+  if (!practiceChain.length) {
+    el.innerHTML = '<div style="color:var(--dim);font-size:.85rem;">The chain will appear here…</div>';
+    return;
+  }
+  el.innerHTML = practiceChain.slice(-5).map((item, i, arr) => {
+    const cur    = i === arr.length - 1;
+    const actor  = item.type === 'actor';
+    const img    = item.imagePath ? tmdbImg(item.imagePath) : null;
+    const full   = actor && item.imagePath ? tmdbImg(item.imagePath, 'w500') : '';
+    return `<div class="chain-item ${cur ? 'current' : ''}">
+      ${img ? `<img class="chain-thumb ${actor ? 'round' : ''}" src="${img}" alt="${item.name}" loading="lazy"
+               ${actor ? `data-fullimg="${full}" data-name="${item.name}"` : ''}>` : `<div class="chain-thumb ${actor ? 'round' : ''}"></div>`}
+      <div class="chain-item-text">
+        <div class="chain-item-label">${actor ? '⭐ Actor' : '🎬 Movie'}</div>
+        <div class="chain-item-name">${item.name}</div>
+      </div>
+    </div>`;
+  }).join('');
+  el.querySelectorAll('.chain-thumb.round[data-fullimg]').forEach(img =>
+    img.addEventListener('click', () => openLightbox(img.dataset.fullimg, img.dataset.name))
+  );
+}
+
+function renderPracticePrompt() {
+  const el  = document.getElementById('practicePrompt');
+  const inp = document.getElementById('practiceInput');
+  if (!practiceLastItem) {
+    el.innerHTML    = practiceStartType === 'actor' ? 'Name any <strong>actor</strong> to start' : 'Name any <strong>movie</strong> to start';
+    inp.placeholder = practiceStartType === 'actor' ? 'Actor name…' : 'Movie title…';
+  } else if (practiceLastItem.type === 'movie') {
+    el.innerHTML = `Name an <strong>actor</strong> from <strong>${practiceLastItem.name}</strong>`;
+    inp.placeholder = 'Actor name…';
+  } else {
+    el.innerHTML = `Name a <strong>movie</strong> starring <strong>${practiceLastItem.name}</strong>`;
+    inp.placeholder = 'Movie title…';
+  }
+}
+
+function renderPracticeDots() {
+  for (let i = 0; i < 3; i++) {
+    document.getElementById(`pd${i}`).classList.toggle('gone', i < practiceAttempts);
+  }
+}
+
+async function endPractice() {
+  const score = practiceChain.length;
+  document.getElementById('practiceScore').textContent  = score;
+  document.getElementById('practiceChainLen').textContent = score;
+  // Save best practice score for signed-in users
+  let bestLabel = '';
+  if (currentUser && db) {
+    try {
+      const snap = await db.ref(`users/${currentUser.uid}/bestPracticeChain`).once('value');
+      const prev = snap.val() ?? 0;
+      if (score > prev) {
+        await db.ref(`users/${currentUser.uid}/bestPracticeChain`).set(score);
+        bestLabel = score > 0 ? '🏆 New personal best!' : '';
+      } else {
+        bestLabel = prev > 0 ? `Personal best: ${prev}` : '';
+      }
+    } catch (_) {}
+  }
+  document.getElementById('practiceBestLabel').textContent = bestLabel;
+  // Render chain log
+  const logEl = document.getElementById('practiceChainLog');
+  if (!practiceChain.length) {
+    logEl.innerHTML = '<p style="font-size:0.82rem;color:var(--dim);padding:8px 0;">No links — try again!</p>';
+  } else {
+    logEl.innerHTML = practiceChain.map(item => {
+      const actor = item.type === 'actor';
+      const img   = item.imagePath ? tmdbImg(item.imagePath) : null;
+      const full  = actor && item.imagePath ? tmdbImg(item.imagePath, 'w500') : '';
+      return `<div class="chain-log-item">
+        ${img ? `<img class="chain-log-thumb ${actor ? 'round' : ''}" src="${img}" alt="" loading="lazy"
+                 ${actor ? `data-fullimg="${full}" data-name="${item.name}"` : ''}>` : `<span class="icon">${actor ? '⭐' : '🎬'}</span>`}
+        <span>${item.name}</span>
+      </div>`;
+    }).join('');
+    logEl.querySelectorAll('.chain-log-thumb.round[data-fullimg]').forEach(img =>
+      img.addEventListener('click', () => openLightbox(img.dataset.fullimg, img.dataset.name))
+    );
+  }
+  showScreen('screen-practiceOver');
+}
+
+// ============================================================
 //  Event listeners
 // ============================================================
 
 // Auth
 document.getElementById('googleSignInBtn').addEventListener('click', signInWithGoogle);
 document.getElementById('signOutBtn').addEventListener('click', signOutUser);
+
+// Friends
+document.getElementById('addFriendBtn').addEventListener('click', sendFriendRequest);
+document.getElementById('addFriendInput').addEventListener('keydown', e => { if (e.key === 'Enter') sendFriendRequest(); });
+
+// Practice — landing entry
+document.getElementById('practiceBtn').addEventListener('click', enterPractice);
+
+// Practice — type picker
+document.getElementById('practiceStartMovieBtn').addEventListener('click', () => beginPracticeWith('movie'));
+document.getElementById('practiceStartActorBtn').addEventListener('click', () => beginPracticeWith('actor'));
+
+// Practice — submit
+document.getElementById('practiceSubmitBtn').addEventListener('click', handlePracticeSubmit);
+document.getElementById('practiceInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter') handlePracticeSubmit();
+  if (e.key === 'Escape') clearSuggestionsEl('practiceSuggestions');
+});
+
+const debouncedPracticeSearch = debounce(q => {
+  fetchSuggestionsFor(q, practiceDirection(), 'practiceSuggestions', item => {
+    practiceSelected = item;
+    document.getElementById('practiceInput').value = item.name;
+    clearSuggestionsEl('practiceSuggestions');
+  });
+}, 300);
+
+document.getElementById('practiceInput').addEventListener('input', function () {
+  practiceSelected = null;
+  debouncedPracticeSearch(this.value.trim());
+});
+
+// Practice — end / try again / back
+document.getElementById('endPracticeBtn').addEventListener('click', () => {
+  if (!practiceChain.length || confirm('End practice? Your chain progress will be lost.')) endPractice();
+});
+document.getElementById('practiceTryAgainBtn').addEventListener('click', enterPractice);
+document.getElementById('practiceBackBtn').addEventListener('click', () => showScreen('screen-landing'));
 
 // Editable game name — save on change (blur + value changed) or Enter key
 document.getElementById('gameNameInput').addEventListener('change', function () {
