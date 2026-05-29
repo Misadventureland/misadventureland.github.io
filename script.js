@@ -1920,12 +1920,19 @@ async function renderFriendsList() {
     return;
   }
   el.innerHTML = entries.map(([fuid, d]) =>
-    `<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--bd);">
-       <span style="flex:1;font-size:0.88rem;">${escHtml(d.name ?? '?')}</span>
+    `<div style="display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--bd);">
+       <span style="flex:1;font-size:0.88rem;color:var(--text);">${escHtml(d.name ?? '?')}</span>
+       <button class="invite-game-btn" data-uid="${fuid}" data-name="${escHtml(d.name ?? '?')}"
+         style="background:none;border:1px solid var(--bd2);color:var(--dim);font-size:0.52rem;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;cursor:pointer;font-family:inherit;padding:5px 10px;transition:all 0.15s;"
+         onmouseover="if(!this.dataset.sent){this.style.borderColor='var(--ok)';this.style.color='var(--ok)'}"
+         onmouseout="if(!this.dataset.sent){this.style.borderColor='var(--bd2)';this.style.color='var(--dim)'}">Invite</button>
        <button class="rm-friend-btn" data-uid="${fuid}"
-         style="background:none;border:none;color:var(--dim);font-size:0.6rem;letter-spacing:0.1em;text-transform:uppercase;cursor:pointer;font-family:inherit;padding:2px 0;">Remove</button>
+         style="background:none;border:none;color:var(--dim);font-size:0.52rem;letter-spacing:0.1em;text-transform:uppercase;cursor:pointer;font-family:inherit;padding:2px 0;">Remove</button>
      </div>`
   ).join('');
+  el.querySelectorAll('.invite-game-btn').forEach(btn =>
+    btn.addEventListener('click', () => inviteFromFriendsList(btn.dataset.uid, btn.dataset.name, btn))
+  );
   el.querySelectorAll('.rm-friend-btn').forEach(btn =>
     btn.addEventListener('click', () => removeFriend(btn.dataset.uid))
   );
@@ -2263,6 +2270,85 @@ async function sendGameInvite(friendUid, friendName, btnEl) {
       btnEl.style.borderColor = 'var(--ok)';
     }
   } catch (_) {
+    if (btnEl) { btnEl.disabled = false; btnEl.textContent = 'Invite'; }
+    showToast('Could not send invite — try again', 'err');
+  }
+}
+
+// ============================================================
+//  Invite to game from friends list (Account page)
+// ============================================================
+async function inviteFromFriendsList(friendUid, friendName, btnEl) {
+  if (!currentUser || !db) { showToast('Sign in to invite friends', 'err'); return; }
+  if (btnEl) { btnEl.disabled = true; btnEl.textContent = 'Setting up…'; }
+
+  try {
+    // Use stored game name so it matches what the friend will see
+    const myNameSnap = await db.ref(`users/${currentUser.uid}/gameName`).once('value');
+    const myName = myNameSnap.val() ?? currentUser.displayName ?? 'Player';
+
+    let targetRoomId;
+    let justCreated = false;
+
+    if (roomId && roomSnap?.status === 'waiting') {
+      // Already in a waiting lobby — just send the invite for it
+      targetRoomId = roomId;
+    } else {
+      // Not in a lobby — create one now
+      const newCode = genRoomCode();
+      const { word, wordMovieId } = await fetchRandomWord();
+      const newRoomRef = db.ref(`rooms/${newCode}`);
+
+      me.id   = currentUser.uid;
+      me.name = myName;
+
+      await newRoomRef.set({
+        hostId: me.id, status: 'waiting',
+        currentIdx: 0, currentAttempts: 0,
+        lastChainItem: null,
+        usedMovies: {}, usedActors: {},
+        players: { [me.id]: { name: myName, letters: '', order: 0, out: false } },
+        playerOrder: [me.id],
+        winner: null, log: {}, fullLog: {},
+        pendingChallenge: null, challenge: null,
+        reverseUsed: {}, reverseMoveActive: null,
+        word, wordMovieId: wordMovieId ?? null
+      });
+
+      if (listener) roomRef?.off('value', listener);
+      roomId   = newCode;
+      roomRef  = newRoomRef;
+      isHost   = true;
+      gameStatsWritten = false;
+      targetRoomId = newCode;
+      justCreated  = true;
+
+      // Also set the player name input for if they navigate to landing later
+      const nameInput = document.getElementById('playerName');
+      if (nameInput && !nameInput.value.trim()) nameInput.value = myName;
+
+      newRoomRef.onDisconnect().update({ [`players/${me.id}/connected`]: false });
+      saveSession();
+      attachListener();
+    }
+
+    // Write the invite to the friend's node
+    await db.ref(`users/${friendUid}/gameInvites/${targetRoomId}`).set({
+      fromName: myName, fromUid: currentUser.uid,
+      roomCode: targetRoomId, sentAt: Date.now()
+    });
+
+    if (justCreated) {
+      // Created a new room — move to lobby (the invite is already sent)
+      showToast(`Invite sent to ${friendName} — waiting in lobby`, 'ok');
+      goLobby();
+    } else {
+      // Already in lobby — just confirm
+      if (btnEl) { btnEl.dataset.sent = '1'; btnEl.textContent = '✓ Invited'; btnEl.style.color = 'var(--ok)'; btnEl.style.borderColor = 'var(--ok)'; }
+      showToast(`Invite sent to ${friendName}!`, 'ok');
+    }
+  } catch (e) {
+    console.error(e);
     if (btnEl) { btnEl.disabled = false; btnEl.textContent = 'Invite'; }
     showToast('Could not send invite — try again', 'err');
   }
