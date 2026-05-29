@@ -186,13 +186,15 @@ if (!firebaseReady) {
     if (user && nameInput && !nameInput.value.trim()) {
       nameInput.value = user.displayName ?? '';
     }
-    // Refresh friends cache and start/stop real-time request listener
+    // Refresh friends cache and start/stop real-time listeners
     if (user) {
       loadMyFriendNames();
       attachFriendReqListener();
+      attachGameInviteListener();
     } else {
       myFriendNames = new Set();
       detachFriendReqListener();
+      detachGameInviteListener();
       hideFriendReqPopup();
     }
   });
@@ -226,6 +228,10 @@ let _pendingFriendReq    = null;  // { uid, name }
 let _friendReqCallback   = null;  // Firebase onChildAdded handler
 let _friendReqRef        = null;
 let _friendReqAttachTime = 0;
+
+// Game invite listener state
+let _gameInviteListener = null;
+let _gameInviteRef      = null;
 
 // Practice mode (all local — no Firebase room)
 let practiceChain      = [];
@@ -875,10 +881,13 @@ function onRoomChange() {
   const cur = document.querySelector('.screen.active')?.id;
   if (s === 'waiting'  && cur !== 'screen-lobby')    showScreen('screen-lobby');
   if (s === 'playing'  && cur !== 'screen-game')     showScreen('screen-game');
-  if (s === 'finished' && cur !== 'screen-gameover') {
-    renderGameOver();
-    showScreen('screen-gameover');
-    showWordQuoteSplash(); // cinematic reveal before the scores
+  if (s === 'finished') {
+    if (cur !== 'screen-gameover') {
+      renderGameOver();
+      showScreen('screen-gameover');
+      showWordQuoteSplash(); // cinematic reveal before the scores
+    }
+    renderRematchButton(); // keep button state in sync for late-arriving rematch offers
   }
   if (s === 'waiting') renderLobby();
   if (s === 'playing') renderGame();
@@ -891,6 +900,7 @@ function goLobby() {
   showScreen('screen-lobby');
   document.getElementById('lobbyCode').textContent = roomId;
   document.getElementById('gameCode').textContent  = roomId;
+  renderLobbyInvites(); // load friends invite list async (no-op if not signed in)
 }
 
 function renderLobby() {
@@ -2062,6 +2072,203 @@ async function addFriendInGame(playerName) {
 }
 
 // ============================================================
+//  Rematch
+// ============================================================
+async function proposeRematch() {
+  if (!roomSnap || !db) return;
+
+  // If a rematch room was already proposed by the other player, join it instead
+  const existing = roomSnap.rematchRoomId;
+  if (existing) {
+    const btn = document.getElementById('rematchBtn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Joining…'; }
+    const snap = await db.ref(`rooms/${existing}`).once('value');
+    if (!snap.exists() || snap.val().status !== 'waiting') {
+      alert('Rematch room is no longer available — start a new game instead.');
+      if (btn) { btn.disabled = false; }
+      renderRematchButton();
+      return;
+    }
+    // Detach from old room
+    if (listener) roomRef.off('value', listener);
+    const oldRoomRef = roomRef;
+    // Switch to new room
+    roomId   = existing;
+    roomRef  = db.ref(`rooms/${roomId}`);
+    isHost   = false;
+    gameStatsWritten = false;
+    const order = toArray(snap.val().playerOrder);
+    if (!order.includes(me.id)) {
+      await roomRef.update({
+        [`players/${me.id}`]: { name: me.name, letters: '', order: order.length, out: false },
+        playerOrder: [...order, me.id]
+      });
+    }
+    roomRef.onDisconnect().update({ [`players/${me.id}/connected`]: false });
+    saveSession();
+    attachListener();
+    goLobby();
+    return;
+  }
+
+  // Create a fresh rematch room
+  const btn = document.getElementById('rematchBtn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Creating…'; }
+  const newCode = genRoomCode();
+  const { word, wordMovieId } = await fetchRandomWord();
+  const newRoomRef = db.ref(`rooms/${newCode}`);
+  await newRoomRef.set({
+    hostId: me.id, status: 'waiting',
+    currentIdx: 0, currentAttempts: 0,
+    lastChainItem: null,
+    usedMovies: {}, usedActors: {},
+    players: { [me.id]: { name: me.name, letters: '', order: 0, out: false } },
+    playerOrder: [me.id],
+    winner: null, log: {}, fullLog: {},
+    pendingChallenge: null, challenge: null,
+    reverseUsed: {}, reverseMoveActive: null,
+    word, wordMovieId: wordMovieId ?? null
+  });
+  // Mark rematch on old room so other players see it
+  await roomRef.update({ rematchRoomId: newCode });
+  // Detach from old room and move to new lobby
+  if (listener) roomRef.off('value', listener);
+  roomId  = newCode;
+  roomRef = newRoomRef;
+  isHost  = true;
+  gameStatsWritten = false;
+  saveSession();
+  attachListener();
+  goLobby();
+}
+
+function renderRematchButton() {
+  const btn    = document.getElementById('rematchBtn');
+  const status = document.getElementById('rematchStatus');
+  if (!btn) return;
+  const code = roomSnap?.rematchRoomId;
+  btn.disabled = false;
+  if (code) {
+    btn.textContent        = 'Join Rematch! →';
+    btn.style.borderColor  = 'var(--ok)';
+    btn.style.color        = 'var(--ok)';
+    if (status) status.textContent = `Room ${code} is ready`;
+  } else {
+    btn.textContent        = 'Rematch →';
+    btn.style.borderColor  = '';
+    btn.style.color        = '';
+    if (status) status.textContent = '';
+  }
+}
+
+// ============================================================
+//  Game invite listener (landing page)
+// ============================================================
+function attachGameInviteListener() {
+  detachGameInviteListener();
+  if (!currentUser || !db) return;
+  _gameInviteRef = db.ref(`users/${currentUser.uid}/gameInvites`);
+  _gameInviteListener = snap => renderGameInvites(snap.val() ?? {});
+  _gameInviteRef.on('value', _gameInviteListener);
+}
+
+function detachGameInviteListener() {
+  if (_gameInviteRef && _gameInviteListener) {
+    _gameInviteRef.off('value', _gameInviteListener);
+  }
+  _gameInviteRef = null;
+  _gameInviteListener = null;
+  renderGameInvites({});  // clear the section
+}
+
+function renderGameInvites(invites) {
+  const section = document.getElementById('gameInvitesSection');
+  const list    = document.getElementById('gameInvitesList');
+  if (!section || !list) return;
+  const cutoff = Date.now() - 30 * 60 * 1000; // ignore invites > 30 min old
+  const valid  = Object.entries(invites)
+    .filter(([, v]) => v && (v.sentAt ?? 0) > cutoff)
+    .sort(([, a], [, b]) => (b.sentAt ?? 0) - (a.sentAt ?? 0));
+  if (!valid.length) { section.style.display = 'none'; return; }
+  section.style.display = 'block';
+  list.innerHTML = valid.map(([code, inv]) => `
+    <div style="display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--bd);">
+      <div style="flex:1;min-width:0;">
+        <div style="font-size:0.88rem;color:var(--text);font-weight:500;">${escHtml(inv.fromName ?? '?')}</div>
+        <div style="font-size:0.58rem;color:var(--dim);margin-top:2px;letter-spacing:0.06em;">invited you · Room ${escHtml(code)}</div>
+      </div>
+      <button data-invite-join="${escHtml(code)}"
+        style="background:var(--ok);color:#fff;border:none;padding:8px 14px;font-size:0.58rem;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;cursor:pointer;font-family:inherit;white-space:nowrap;flex-shrink:0;">Join</button>
+      <button data-invite-dismiss="${escHtml(code)}"
+        style="background:none;border:1px solid var(--bd2);color:var(--dim);padding:8px 10px;font-size:0.78rem;cursor:pointer;font-family:inherit;flex-shrink:0;">✕</button>
+    </div>
+  `).join('');
+}
+
+async function acceptGameInvite(roomCode) {
+  const name = document.getElementById('playerName').value.trim() || me.name;
+  if (!name) { alert('Enter your name first — then tap Join.'); return; }
+  // Remove the invite entry before joining
+  if (currentUser && db) {
+    await db.ref(`users/${currentUser.uid}/gameInvites/${roomCode}`).remove().catch(() => {});
+  }
+  joinRoom(name, roomCode);
+}
+
+async function dismissGameInvite(roomCode) {
+  if (!currentUser || !db) return;
+  await db.ref(`users/${currentUser.uid}/gameInvites/${roomCode}`).remove().catch(() => {});
+}
+
+// ============================================================
+//  Send game invite from lobby
+// ============================================================
+async function renderLobbyInvites() {
+  const section = document.getElementById('lobbyInviteSection');
+  const list    = document.getElementById('lobbyInviteList');
+  if (!section || !list || !currentUser || !db || !roomId) {
+    if (section) section.style.display = 'none';
+    return;
+  }
+  const snap    = await db.ref(`users/${currentUser.uid}/friends`).once('value');
+  const friends = snap.val() ?? {};
+  const entries = Object.entries(friends);
+  if (!entries.length) { section.style.display = 'none'; return; }
+  section.style.display = 'block';
+  list.innerHTML = entries.map(([fuid, f]) => `
+    <div style="display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--bd);">
+      <span style="flex:1;font-size:0.86rem;color:var(--text);">${escHtml(f.name ?? '?')}</span>
+      <button data-invite-friend="${escHtml(fuid)}" data-friend-name="${escHtml(f.name ?? '?')}"
+        style="background:none;border:1px solid var(--bd2);color:var(--dim);font-size:0.52rem;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;cursor:pointer;font-family:inherit;padding:5px 11px;transition:all 0.15s;"
+        onmouseover="this.style.borderColor='var(--ok)';this.style.color='var(--ok)'"
+        onmouseout="if(!this.dataset.sent){this.style.borderColor='var(--bd2)';this.style.color='var(--dim)'}">Invite</button>
+    </div>
+  `).join('');
+}
+
+async function sendGameInvite(friendUid, friendName, btnEl) {
+  if (!currentUser || !db || !roomId) return;
+  if (btnEl) { btnEl.disabled = true; btnEl.textContent = 'Sending…'; }
+  try {
+    const myNameSnap = await db.ref(`users/${currentUser.uid}/gameName`).once('value');
+    const myName = myNameSnap.val() ?? me.name ?? 'Someone';
+    await db.ref(`users/${friendUid}/gameInvites/${roomId}`).set({
+      fromName: myName, fromUid: currentUser.uid,
+      roomCode: roomId, sentAt: Date.now()
+    });
+    if (btnEl) {
+      btnEl.dataset.sent    = '1';
+      btnEl.textContent     = '✓ Invited';
+      btnEl.style.color     = 'var(--ok)';
+      btnEl.style.borderColor = 'var(--ok)';
+    }
+  } catch (_) {
+    if (btnEl) { btnEl.disabled = false; btnEl.textContent = 'Invite'; }
+    showToast('Could not send invite — try again', 'err');
+  }
+}
+
+// ============================================================
 //  Friends cache loader
 // ============================================================
 async function loadMyFriendNames() {
@@ -2347,10 +2554,23 @@ document.getElementById('googleSignInBtn').addEventListener('click', signInWithG
 document.getElementById('accountBtn').addEventListener('click', showAccount);
 document.getElementById('landingSignOutBtn').addEventListener('click', signOutUser);
 
-// Delegated: "+ Add friend" buttons anywhere in the game (lobby, score cards, final scores)
+// Delegated clicks — add-friend, game invites, lobby invites
 document.body.addEventListener('click', e => {
-  const el = e.target.closest('[data-add-friend]');
-  if (el) addFriendInGame(el.dataset.addFriend);
+  // "+ Add friend" buttons anywhere in the game
+  const addEl = e.target.closest('[data-add-friend]');
+  if (addEl) { addFriendInGame(addEl.dataset.addFriend); return; }
+
+  // Join a game invite (landing page)
+  const joinEl = e.target.closest('[data-invite-join]');
+  if (joinEl) { acceptGameInvite(joinEl.dataset.inviteJoin); return; }
+
+  // Dismiss a game invite (landing page)
+  const dismissEl = e.target.closest('[data-invite-dismiss]');
+  if (dismissEl) { dismissGameInvite(dismissEl.dataset.inviteDismiss); return; }
+
+  // Send invite to a friend (lobby)
+  const inviteEl = e.target.closest('[data-invite-friend]');
+  if (inviteEl) { sendGameInvite(inviteEl.dataset.inviteFriend, inviteEl.dataset.friendName, inviteEl); return; }
 });
 
 // Account page
@@ -2584,6 +2804,7 @@ document.addEventListener('click', e => {
 });
 
 // Game over
+document.getElementById('rematchBtn').addEventListener('click', proposeRematch);
 document.getElementById('playAgainBtn').addEventListener('click', () => {
   if (listener) roomRef.off('value', listener);
   roomSnap = null; roomId = null; roomRef = null; isHost = false; listener = null;

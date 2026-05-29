@@ -640,6 +640,14 @@
     </div>
   </div>
 
+  <!-- Game invites from friends — shown when signed in and invites are pending -->
+  <div id="gameInvitesSection" style="display:none;margin-bottom:10px;">
+    <div class="card" style="border-color:rgba(58,170,104,0.45);padding:18px 20px;">
+      <div style="font-size:0.52rem;font-weight:700;letter-spacing:0.26em;text-transform:uppercase;color:var(--ok);margin-bottom:12px;">🎬 Game Invites</div>
+      <div id="gameInvitesList"></div>
+    </div>
+  </div>
+
   <div class="card">
     <label for="playerName">Your Name</label>
     <input type="text" id="playerName" placeholder="Enter your name" maxlength="20" autocomplete="off">
@@ -684,6 +692,15 @@
 
   <button class="btn btn-gold" id="startBtn" disabled>Waiting for players&hellip;</button>
   <button class="btn btn-outline" id="shareBtn" style="margin-top:10px;">📱 Share Invite Link</button>
+
+  <!-- Invite friends from your friends list — only shown when signed in and friends exist -->
+  <div id="lobbyInviteSection" style="display:none;margin-top:10px;">
+    <div class="card" style="padding:16px 20px;">
+      <div style="font-size:0.52rem;font-weight:700;letter-spacing:0.24em;text-transform:uppercase;color:var(--dim);margin-bottom:10px;">Invite a Friend</div>
+      <div id="lobbyInviteList"></div>
+    </div>
+  </div>
+
   <div style="text-align:center;margin-top:16px;">
     <button id="leaveLobbyBtn" style="background:none;border:none;color:var(--dim);font-size:0.62rem;font-weight:500;letter-spacing:0.14em;cursor:pointer;font-family:inherit;text-transform:uppercase;padding:4px 8px;">Leave Lobby</button>
   </div>
@@ -899,7 +916,11 @@
     <div class="chain-log" id="finalChain"></div>
   </div>
 
-  <button class="btn btn-gold" id="playAgainBtn" style="margin-top:16px;">Play Again</button>
+  <div style="display:flex;gap:10px;margin-top:16px;">
+    <button class="btn btn-outline" id="rematchBtn" style="flex:1;margin:0;">Rematch →</button>
+    <button class="btn btn-gold"    id="playAgainBtn" style="flex:1;margin:0;">New Game</button>
+  </div>
+  <p id="rematchStatus" style="text-align:center;font-size:0.6rem;color:var(--dim);letter-spacing:0.06em;margin-top:8px;min-height:1em;"></p>
 </div>
 
 <!-- ══ ACCOUNT ════════════════════════════════════════ -->
