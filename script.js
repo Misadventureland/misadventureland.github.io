@@ -523,6 +523,39 @@ async function personFilmography(personId) {
 }
 
 // ============================================================
+//  Niche / obscurity scoring
+// ============================================================
+// Returns 1-99: higher = more obscure.
+// Movies use vote_count (most stable) + popularity + recency guard.
+// Actors use popularity alone (only reliable signal without extra calls).
+function computeNicheScore(type, { popularity = 0, voteCount = 0, releaseYear = null } = {}) {
+  if (type === 'movie') {
+    // TMDB vote counts: Shawshank ~2.6M (top), blockbusters 500k-2.5M,
+    // popular ~50k-500k, niche ~500-5k, obscure <500.
+    // log10(2,500,000) ≈ 6.4 → use as ceiling.
+    const voteNorm = Math.log10(Math.max(voteCount, 1)) / 6.4;
+    // Popularity ceiling ~500 for currently trending titles
+    const popNorm  = Math.log10(Math.max(popularity, 1)) / Math.log10(500);
+    // Very recent films (<2 yrs) naturally have low vote counts — don't classify them as obscure
+    const year  = parseInt(releaseYear ?? '2000');
+    const age   = new Date().getFullYear() - year;
+    const recency = age < 2 ? 0.15 : 0;
+    const mainstream = Math.min(1, voteNorm * 0.65 + popNorm * 0.35 + recency);
+    return Math.max(1, Math.min(99, Math.round((1 - mainstream) * 100)));
+  }
+  // Actor: popularity ceiling ~150 for top stars
+  const popNorm = Math.log10(Math.max(popularity, 1)) / Math.log10(150);
+  return Math.max(1, Math.min(99, Math.round((1 - Math.min(1, popNorm)) * 100)));
+}
+
+// Returns a display badge object, or null for mainstream answers (no badge shown)
+function nicheLabel(score) {
+  if (score >= 80) return { emoji: '💎', text: 'Hidden gem' };
+  if (score >= 60) return { emoji: '🎯', text: 'Deep cut' };
+  return null;
+}
+
+// ============================================================
 //  Autocomplete — shared between main input & challenge input
 // ============================================================
 
@@ -536,14 +569,18 @@ async function fetchSuggestionsFor(query, direction, suggestionsId, onSelect) {
       results = (data.results ?? []).slice(0, 6).map(p => ({
         tmdbId: p.id, name: p.name, type: 'actor',
         imagePath: p.profile_path ?? null,
-        sub: ''
+        sub: '',
+        popularity: p.popularity ?? 0   // preserved for niche scoring
       }));
     } else {
       const data = await tmdbFetch('/search/movie', { query, language: 'en-US' });
       results = (data.results ?? []).slice(0, 6).map(m => ({
         tmdbId: m.id, name: m.title, type: 'movie',
         imagePath: m.poster_path ?? null,
-        sub: m.release_date ? m.release_date.slice(0, 4) : ''
+        sub: m.release_date ? m.release_date.slice(0, 4) : '',
+        popularity:  m.popularity  ?? 0,   // preserved for niche scoring
+        voteCount:   m.vote_count  ?? 0,
+        releaseYear: m.release_date?.slice(0, 4) ?? null
       }));
     }
     renderSuggestionsIn(results, suggestionsId, onSelect);
@@ -602,35 +639,41 @@ function challengeDirection() {
 async function validateAnswer(input, lastItem, usedMovies, usedActors, preSelected = null, roundStartType = null) {
   // Actor-first round: no chain yet, chooser picked "actor"
   if (!lastItem && roundStartType === 'actor') {
-    let personId, personName, imagePath;
+    let personId, personName, imagePath, personPop;
     if (preSelected) {
-      personId = preSelected.tmdbId; personName = preSelected.name; imagePath = preSelected.imagePath;
+      personId = preSelected.tmdbId; personName = preSelected.name;
+      imagePath = preSelected.imagePath; personPop = preSelected.popularity ?? 0;
     } else {
       const p = await searchPerson(input);
       if (!p) return { valid: false, error: `Can't find an actor named "${input}"` };
-      personId = p.id; personName = p.name; imagePath = p.profile_path ?? null;
+      personId = p.id; personName = p.name; imagePath = p.profile_path ?? null; personPop = p.popularity ?? 0;
     }
     if (usedActors?.[personId]) return { valid: false, error: `${personName} was already used` };
-    // Ace check: the opening actor must have at least one unused movie others can follow with
     const films = await personFilmography(personId);
     if (films.filter(f => !usedMovies?.[f.id]).length === 0) {
       return { valid: false, error: `${personName} has no available movies to follow — that's an ace. Try someone else` };
     }
-    return { valid: true, name: personName, tmdbId: personId, type: 'actor', imagePath };
+    return { valid: true, name: personName, tmdbId: personId, type: 'actor', imagePath,
+             nicheScore: computeNicheScore('actor', { popularity: personPop }) };
   }
 
   if (!lastItem) {
-    const movie = preSelected
-      ? { id: preSelected.tmdbId, title: preSelected.name, poster_path: preSelected.imagePath }
-      : await searchMovie(input);
+    let movie;
+    if (preSelected) {
+      movie = { id: preSelected.tmdbId, title: preSelected.name, poster_path: preSelected.imagePath,
+                popularity: preSelected.popularity ?? 0, vote_count: preSelected.voteCount ?? 0,
+                release_date: preSelected.releaseYear ? `${preSelected.releaseYear}-01-01` : null };
+    } else {
+      movie = await searchMovie(input);
+    }
     if (!movie) return { valid: false, error: `Can't find a movie called "${input}"` };
     if (usedMovies?.[movie.id]) return { valid: false, error: `"${movie.title}" was already used` };
-    // Ace check: the opening movie must have at least one unused actor others can follow with
     const cast = await movieCast(movie.id);
     if (cast.filter(c => !usedActors?.[c.id]).length === 0) {
       return { valid: false, error: `"${movie.title}" has no available actors to follow — that's an ace. Try a different movie` };
     }
-    return { valid: true, name: movie.title, tmdbId: movie.id, type: 'movie', imagePath: movie.poster_path ?? null };
+    return { valid: true, name: movie.title, tmdbId: movie.id, type: 'movie', imagePath: movie.poster_path ?? null,
+             nicheScore: computeNicheScore('movie', { popularity: movie.popularity, voteCount: movie.vote_count, releaseYear: movie.release_date?.slice(0,4) }) };
   }
 
   if (lastItem.type === 'movie') {
@@ -645,21 +688,33 @@ async function validateAnswer(input, lastItem, usedMovies, usedActors, preSelect
     if (usedActors?.[personId]) return { valid: false, error: `${personName} was already used` };
     const cast = await movieCast(lastItem.tmdbId);
     if (!cast.some(c => c.id === personId)) return { valid: false, error: `${personName} wasn't in "${lastItem.name}"` };
-    return { valid: true, name: personName, tmdbId: personId, type: 'actor', imagePath };
+    // Use the cast member's own popularity for the niche score — more precise than a generic search
+    const castMember = cast.find(c => c.id === personId);
+    return { valid: true, name: personName, tmdbId: personId, type: 'actor', imagePath,
+             nicheScore: computeNicheScore('actor', { popularity: castMember?.popularity ?? preSelected?.popularity ?? 0 }) };
 
   } else {
-    let movieId, movieTitle, imagePath;
+    let movieId, movieTitle, imagePath, moviePop, movieVotes, movieYear;
     if (preSelected) {
       movieId = preSelected.tmdbId; movieTitle = preSelected.name; imagePath = preSelected.imagePath;
+      moviePop = preSelected.popularity ?? 0; movieVotes = preSelected.voteCount ?? 0; movieYear = preSelected.releaseYear ?? null;
     } else {
       const m = await searchMovie(input);
       if (!m) return { valid: false, error: `Can't find a movie called "${input}"` };
       movieId = m.id; movieTitle = m.title; imagePath = m.poster_path ?? null;
+      moviePop = m.popularity ?? 0; movieVotes = m.vote_count ?? 0; movieYear = m.release_date?.slice(0,4) ?? null;
     }
     if (usedMovies?.[movieId]) return { valid: false, error: `"${movieTitle}" was already used` };
     const films = await personFilmography(lastItem.tmdbId);
     if (!films.some(m => m.id === movieId)) return { valid: false, error: `${lastItem.name} wasn't in "${movieTitle}"` };
-    return { valid: true, name: movieTitle, tmdbId: movieId, type: 'movie', imagePath };
+    // Filmography entries also carry vote_count/popularity — prefer them as they're fresh
+    const filmEntry = films.find(f => f.id === movieId);
+    return { valid: true, name: movieTitle, tmdbId: movieId, type: 'movie', imagePath,
+             nicheScore: computeNicheScore('movie', {
+               popularity:  filmEntry?.popularity  ?? moviePop,
+               voteCount:   filmEntry?.vote_count  ?? movieVotes,
+               releaseYear: filmEntry?.release_date?.slice(0,4) ?? movieYear
+             }) };
   }
 }
 
@@ -692,22 +747,26 @@ async function validateReverseAnswer(input, lastItem, usedMovies, usedActors, pr
     if (!sharedFilm) {
       return { valid: false, error: `${personName} and ${lastItem.name} haven't appeared in a movie together` };
     }
-    return { valid: true, name: personName, tmdbId: personId, type: 'actor', imagePath, sharedVia: sharedFilm.title };
+    // Actor's popularity from their filmography cross-reference
+    const actorPop = preSelected?.popularity ?? 0;
+    return { valid: true, name: personName, tmdbId: personId, type: 'actor', imagePath, sharedVia: sharedFilm.title,
+             nicheScore: computeNicheScore('actor', { popularity: actorPop }) };
 
   } else {
     // --- Movie → Movie via shared actor ---
-    let movieId, movieTitle, imagePath;
+    let movieId, movieTitle, imagePath, moviePop, movieVotes, movieYear;
     if (preSelected) {
       movieId = preSelected.tmdbId; movieTitle = preSelected.name; imagePath = preSelected.imagePath;
+      moviePop = preSelected.popularity ?? 0; movieVotes = preSelected.voteCount ?? 0; movieYear = preSelected.releaseYear ?? null;
     } else {
       const m = await searchMovie(input);
       if (!m) return { valid: false, error: `Can't find a movie called "${input}"` };
       movieId = m.id; movieTitle = m.title; imagePath = m.poster_path ?? null;
+      moviePop = m.popularity ?? 0; movieVotes = m.vote_count ?? 0; movieYear = m.release_date?.slice(0,4) ?? null;
     }
     if (movieId === lastItem.tmdbId) return { valid: false, error: "That's the same movie!" };
     if (usedMovies?.[movieId]) return { valid: false, error: `"${movieTitle}" was already used` };
 
-    // Find an actor both movies share
     const [castA, castB] = await Promise.all([
       movieCast(lastItem.tmdbId),
       movieCast(movieId)
@@ -717,7 +776,8 @@ async function validateReverseAnswer(input, lastItem, usedMovies, usedActors, pr
     if (!sharedActor) {
       return { valid: false, error: `"${movieTitle}" and "${lastItem.name}" don't share any cast members` };
     }
-    return { valid: true, name: movieTitle, tmdbId: movieId, type: 'movie', imagePath, sharedVia: sharedActor.name };
+    return { valid: true, name: movieTitle, tmdbId: movieId, type: 'movie', imagePath, sharedVia: sharedActor.name,
+             nicheScore: computeNicheScore('movie', { popularity: moviePop, voteCount: movieVotes, releaseYear: movieYear }) };
   }
 }
 
@@ -1304,9 +1364,11 @@ async function handleSubmit() {
       ? await validateReverseAnswer(answer, roomSnap.lastChainItem, roomSnap.usedMovies, roomSnap.usedActors, picked)
       : await validateAnswer(answer, roomSnap.lastChainItem, roomSnap.usedMovies, roomSnap.usedActors, picked, roomSnap.roundStartType ?? null);
     if (result.valid) {
-      const label = result.sharedVia
-        ? `✓ ${result.name} — via ${result.sharedVia}`
-        : `✓ ${result.name}`;
+      const badge    = nicheLabel(result.nicheScore ?? 0);
+      const badgeTxt = badge ? `  ${badge.emoji} ${badge.text}` : '';
+      const label    = result.sharedVia
+        ? `✓ ${result.name} — via ${result.sharedVia}${badgeTxt}`
+        : `✓ ${result.name}${badgeTxt}`;
       setFeedback('feedback', label, 'ok');
       await advanceChain(result, isReverse);
     } else {
@@ -1334,6 +1396,7 @@ async function advanceChain(result, isReverse = false) {
   const entry   = {
     type: result.type, name: result.name, tmdbId: result.tmdbId,
     imagePath: result.imagePath ?? null,
+    ...(result.nicheScore != null ? { nicheScore: result.nicheScore } : {}),
     ...(isReverse ? { isReverse: true, sharedVia: result.sharedVia ?? null } : {})
   };
 
@@ -1798,6 +1861,33 @@ function renderGameOver() {
   if (revealWrap && revealText) {
     revealText.textContent = activeWord();
     revealWrap.style.display = 'block';
+  }
+
+  // Most obscure answer highlight — scan fullLog + current log
+  const allLogEntries = [
+    ...Object.values(roomSnap.fullLog ?? {}),
+    ...Object.values(roomSnap.log  ?? {})
+  ].filter(e => e && e.type !== 'round-end' && e.type !== 'challenge-result' && e.nicheScore != null);
+  if (allLogEntries.length) {
+    const top = allLogEntries.reduce((best, e) => e.nicheScore > best.nicheScore ? e : best);
+    const topBadge = nicheLabel(top.nicheScore);
+    if (topBadge) {
+      const nicheEl = document.getElementById('gameoverNicheHighlight');
+      if (nicheEl) {
+        nicheEl.style.display = 'block';
+        nicheEl.innerHTML = `
+          <span style="font-size:0.5rem;font-weight:700;letter-spacing:0.22em;text-transform:uppercase;color:var(--dim);">Most obscure answer</span>
+          <div style="margin-top:6px;font-size:0.9rem;color:var(--text);font-weight:500;">
+            ${top.type === 'movie' ? '🎬' : '⭐'} ${escHtml(top.name)}
+            <span style="font-size:0.58rem;font-weight:700;letter-spacing:0.1em;margin-left:6px;${
+              topBadge.emoji === '💎'
+                ? 'color:#c9a84c;'
+                : 'color:#8fc8f0;'
+            }">${topBadge.emoji} ${topBadge.text}</span>
+          </div>
+        `;
+      }
+    }
   }
 
   // Pick one random winner quote for this game
@@ -2650,10 +2740,18 @@ function showChainLogModal() {
       const sharedNote = entry.isReverse && entry.sharedVia
         ? `<span style="font-size:0.62rem;color:var(--dim);margin-left:4px;">via ${escHtml(entry.sharedVia)}</span>`
         : '';
+      const badge = nicheLabel(entry.nicheScore ?? 0);
+      const nicheTag = badge
+        ? `<span style="font-size:0.5rem;font-weight:700;letter-spacing:0.1em;padding:1px 5px;border-radius:2px;margin-left:4px;${
+            badge.emoji === '💎'
+              ? 'color:#c9a84c;background:rgba(201,168,76,0.14);border:1px solid rgba(201,168,76,0.35);'
+              : 'color:#8fc8f0;background:rgba(100,180,240,0.1);border:1px solid rgba(100,180,240,0.3);'
+          }">${badge.emoji} ${badge.text.toUpperCase()}</span>`
+        : '';
       html += `<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid rgba(255,255,255,0.04);flex-wrap:wrap;">
         <span style="font-size:0.6rem;color:var(--dim);min-width:22px;text-align:right;">${linkCount}</span>
         <span style="font-size:0.72rem;color:${isMovie ? 'var(--dim)' : '#c9a84c'};">${isMovie ? '🎬' : '⭐'}</span>
-        <span style="font-size:0.82rem;color:var(--text);">${escHtml(entry.name ?? '?')}</span>${reverseTag}${sharedNote}
+        <span style="font-size:0.82rem;color:var(--text);">${escHtml(entry.name ?? '?')}</span>${reverseTag}${sharedNote}${nicheTag}
       </div>`;
     }
   }
