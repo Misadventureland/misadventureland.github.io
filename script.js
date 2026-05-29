@@ -1302,7 +1302,7 @@ async function handleSubmit() {
       await advanceChain(result, isReverse);
     } else {
       setFeedback('feedback', result.error, 'err');
-      await handleFailure();
+      await handleFailure(answer);   // pass the wrong guess so it can be logged
     }
   } catch (e) {
     console.error(e);
@@ -1354,24 +1354,38 @@ async function advanceChain(result, isReverse = false) {
     challenge:        null,
     roundChooserPid:  null,
     roundStartType:   null,
-    reverseMoveActive: null,   // clear the reverse flag — move is done
+    reverseMoveActive:    null,   // clear the reverse flag — move is done
+    currentWrongGuesses:  null,   // successful answer clears any accumulated wrong guesses
     // Opening-move protection: store opener's id so the responder failure path knows
     openingMoveActive: isOpeningMove ? me.id : null,
     openingRetryMsg:   null   // clear any previous retry message
   });
 }
 
-async function handleFailure() {
+async function handleFailure(wrongGuess = null) {
   const attempts = (roomSnap.currentAttempts ?? 0) + 1;
-  if (attempts < 3) { await roomRef.update({ currentAttempts: attempts }); return; }
+  if (attempts < 3) {
+    // Store the wrong guess and bump the counter
+    const updates = { currentAttempts: attempts };
+    if (wrongGuess) {
+      const key = roomRef.child('currentWrongGuesses').push().key;
+      updates[`currentWrongGuesses/${key}`] = wrongGuess;
+    }
+    await roomRef.update(updates);
+    return;
+  }
+  // Third failure — collect all stored guesses + this one to pass to assignLetterAndPass
+  const prev = Object.values(roomSnap.currentWrongGuesses ?? {});
+  const allWrong = wrongGuess ? [...prev, wrongGuess] : prev;
+
   // Opening-move protection: if the responder can't answer the very first play
   // of a round, the opener must choose a different movie/actor instead of the
   // responder receiving a letter.
   const openerPid = roomSnap.openingMoveActive;
   if (openerPid && openerPid !== me.id) {
-    await retryOpeningMove(openerPid);
+    await retryOpeningMove(openerPid); // no letter — wrong guesses discarded
   } else {
-    await assignLetterAndPass(me.id);
+    await assignLetterAndPass(me.id, allWrong);
   }
 }
 
@@ -1389,8 +1403,9 @@ async function retryOpeningMove(openerPid) {
     currentIdx:        openerIdx >= 0 ? openerIdx : roomSnap.currentIdx,
     pendingChallenge:  null,
     challenge:         null,
-    openingMoveActive: null,
-    reverseMoveActive: null,
+    openingMoveActive:   null,
+    reverseMoveActive:   null,
+    currentWrongGuesses: null,   // discard — no letter assigned on retry
     // Keep roundStartType so opener goes straight back to naming, not type-picking
     openingRetryMsg:   `${respName} couldn't answer — pick a different ${typeWord}`
   });
@@ -1499,6 +1514,9 @@ async function resolveChallenge(loserPid, winningAnswer = null) {
     const winnerName  = players[winnerPid]?.name ?? '?';
     const loserLetter = activeWord()[(players[loserPid]?.letters ?? '').length] ?? '?';
 
+    // Write challenge result into the current log so it gets archived with this round
+    const challKey = roomRef.child('log').push().key;
+
     await roomRef.update({
       challenge:           null,
       pendingChallenge:    null,
@@ -1508,6 +1526,16 @@ async function resolveChallenge(loserPid, winningAnswer = null) {
         winnerName,
         winningAnswer: winningAnswer ?? null,
         ts: Date.now()
+      },
+      [`log/${challKey}`]: {
+        type:           'challenge-result',
+        challengerName: players[challenge.challengerId]?.name ?? '?',
+        challengedName: players[challenge.challengedId]?.name ?? '?',
+        answerName:     challenge.answerName,
+        answerType:     challenge.answerType,
+        loserName,
+        winnerName,
+        winningAnswer:  winningAnswer ?? null
       }
     });
   } else {
@@ -1519,7 +1547,7 @@ async function resolveChallenge(loserPid, winningAnswer = null) {
 // ============================================================
 //  Letter assignment (shared by normal failures, give-up, challenge)
 // ============================================================
-async function assignLetterAndPass(pid) {
+async function assignLetterAndPass(pid, wrongGuesses = []) {
   const players    = roomSnap.players ?? {};
   const myLetters  = players[pid]?.letters ?? '';
   const word       = activeWord();
@@ -1536,12 +1564,13 @@ async function assignLetterAndPass(pid) {
   const updates = {
     [`players/${pid}/letters`]: newLetters,
     [`players/${pid}/out`]:     isOut,
-    currentAttempts:    0,
-    challenge:          null,
-    pendingChallenge:   null,
-    openingMoveActive:  null,
-    openingRetryMsg:    null,
-    reverseMoveActive:  null   // safety: clear any in-flight reverse on letter assignment
+    currentAttempts:     0,
+    challenge:           null,
+    pendingChallenge:    null,
+    openingMoveActive:   null,
+    openingRetryMsg:     null,
+    reverseMoveActive:   null,
+    currentWrongGuesses: null   // clear accumulated guesses — they're now in the log marker
   };
 
   if (stillIn.length <= 1) {
@@ -1557,9 +1586,10 @@ async function assignLetterAndPass(pid) {
     // Add a round-end marker so the log viewer can show round breaks
     const markerKey = db.ref().push().key;
     updates[`fullLog/${markerKey}`] = {
-      type:      'round-end',
-      loserName: players[pid]?.name ?? '?',
-      letter:    newLetters[newLetters.length - 1]
+      type:        'round-end',
+      loserName:   players[pid]?.name ?? '?',
+      letter:      newLetters[newLetters.length - 1],
+      wrongGuesses: wrongGuesses.length ? wrongGuesses : null
     };
     const chooserIdx = order.indexOf(pid);
     updates.roundChooserPid  = pid;
@@ -2576,10 +2606,32 @@ function showChainLogModal() {
     if (!entry || typeof entry !== 'object') continue;
 
     if (entry.type === 'round-end') {
-      html += `<div style="margin:10px 0 6px;padding:6px 10px;background:rgba(192,24,43,0.15);border-left:2px solid var(--red);border-radius:3px;font-size:0.7rem;color:var(--dim);">
-        ✗ ${escHtml(entry.loserName ?? '?')} earned <strong style="color:#c0182b;">${escHtml(entry.letter ?? '?')}</strong> — Round ${roundNum} ends
+      // Wrong guesses that preceded this letter
+      const guesses = entry.wrongGuesses ?? null;
+      const guessLine = guesses && guesses.length
+        ? `<div style="font-size:0.64rem;color:var(--dim);margin-bottom:4px;padding-left:2px;">tried: ${guesses.map(g => `<em>${escHtml(g)}</em>`).join(' · ')}</div>`
+        : '';
+      html += `<div style="margin:10px 0 6px;padding:8px 10px;background:rgba(192,24,43,0.12);border-left:2px solid var(--red);border-radius:3px;">
+        ${guessLine}
+        <span style="font-size:0.7rem;color:var(--dim);">✗ ${escHtml(entry.loserName ?? '?')} earned <strong style="color:#c0182b;">${escHtml(entry.letter ?? '?')}</strong> — Round ${roundNum} ends</span>
       </div>`;
       roundNum++;
+    } else if (entry.type === 'challenge-result') {
+      const defended = !!entry.winningAnswer;
+      html += `<div style="margin:6px 0;padding:8px 10px;background:rgba(201,168,76,0.08);border-left:2px solid rgba(201,168,76,0.45);border-radius:3px;">
+        <div style="font-size:0.68rem;color:#c9a84c;font-weight:600;margin-bottom:3px;">⚡ Challenge</div>
+        <div style="font-size:0.7rem;color:var(--dim);">
+          <strong style="color:var(--text);">${escHtml(entry.challengerName ?? '?')}</strong> challenged
+          <strong style="color:var(--text);">${escHtml(entry.challengedName ?? '?')}</strong>'s
+          "<em>${escHtml(entry.answerName ?? '?')}</em>"
+        </div>
+        <div style="font-size:0.68rem;color:var(--dim);margin-top:3px;">
+          ${defended
+            ? `<strong style="color:var(--text);">${escHtml(entry.challengedName ?? '?')}</strong> defended with "<em>${escHtml(entry.winningAnswer)}</em>" — <strong style="color:var(--text);">${escHtml(entry.challengerName ?? '?')}</strong> takes the letter`
+            : `<strong style="color:var(--text);">${escHtml(entry.challengedName ?? '?')}</strong> couldn't defend — takes the letter`
+          }
+        </div>
+      </div>`;
     } else {
       linkCount++;
       const isMovie = entry.type === 'movie';
