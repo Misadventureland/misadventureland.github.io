@@ -1205,9 +1205,9 @@ function renderScores(order, players, curPid) {
         onmouseover="this.style.color='var(--ok)'" onmouseout="this.style.color='var(--dim)'">+ add</button>` : ''}
     </div>`;
   }).join('');
-  // Word indicator below scores
+  // Word is a surprise — keep it hidden during play
   const wordEl = document.getElementById('wordIndicator');
-  if (wordEl) wordEl.textContent = `Spelling: ${activeWord()}`;
+  if (wordEl) wordEl.textContent = '';
 }
 
 // ============================================================
@@ -1636,6 +1636,14 @@ function renderGameOver() {
   finalChainEl.querySelectorAll('.chain-log-thumb.round[data-fullimg]').forEach(img => {
     img.addEventListener('click', () => openLightbox(img.dataset.fullimg, img.dataset.name));
   });
+
+  // Reveal the secret word on the game-over screen
+  const revealWrap = document.getElementById('wordRevealWrap');
+  const revealText = document.getElementById('wordReveal');
+  if (revealWrap && revealText) {
+    revealText.textContent = activeWord();
+    revealWrap.style.display = 'block';
+  }
 
   // Pick one random winner quote for this game
   const q = WINNER_QUOTES[Math.floor(Math.random() * WINNER_QUOTES.length)];
