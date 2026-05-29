@@ -1371,6 +1371,8 @@ async function handleSubmit() {
         : `✓ ${result.name}${badgeTxt}`;
       setFeedback('feedback', label, 'ok');
       await advanceChain(result, isReverse);
+      // Accumulate playstyle data in the background — never blocks the game
+      updatePlaystyleStats(result.nicheScore, result.type);
     } else {
       setFeedback('feedback', result.error, 'err');
       await handleFailure(answer);   // pass the wrong guess so it can be logged
@@ -1927,6 +1929,38 @@ async function writeGameStats(didWin, lettersGot) {
   } catch (e) {
     console.error('Stats write failed:', e);
   }
+}
+
+// ============================================================
+//  Playstyle stats (unsurfaced — for future titles & matchmaking)
+// ============================================================
+// Accumulated per competitive answer. Stored at users/{uid}/playstyle.
+//   totalAnswers   — running count
+//   nicheScoreSum  — divide by totalAnswers to get average obscurity
+//   deepCuts       — answers scoring 60-79 (🎯)
+//   hiddenGems     — answers scoring 80+  (💎)
+//   movieAnswers   — movie/actor split for content-type preference
+//   actorAnswers
+//   lastUpdated
+//
+// These three axes (avg obscurity, obscure-pick rate, movie/actor bias)
+// are enough to generate fun titles and inform matchmaking without
+// exposing any extra UI for now.
+async function updatePlaystyleStats(nicheScore, type) {
+  if (!currentUser || !db || nicheScore == null) return;
+  try {
+    const INC = firebase.database.ServerValue.increment;
+    const updates = {
+      totalAnswers:  INC(1),
+      nicheScoreSum: INC(nicheScore),
+      lastUpdated:   firebase.database.ServerValue.TIMESTAMP
+    };
+    if (nicheScore >= 80)       updates.hiddenGems  = INC(1);
+    else if (nicheScore >= 60)  updates.deepCuts    = INC(1);
+    if (type === 'movie')       updates.movieAnswers = INC(1);
+    else                        updates.actorAnswers = INC(1);
+    await db.ref(`users/${currentUser.uid}/playstyle`).update(updates);
+  } catch (_) {}  // non-critical — silently ignore failures
 }
 
 // ============================================================
