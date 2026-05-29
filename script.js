@@ -571,6 +571,8 @@ function clearSuggestionsEl(id) {
 function mainDirection() {
   const last = roomSnap?.lastChainItem;
   if (!last) return (roomSnap?.roundStartType === 'actor') ? 'actor' : 'movie';
+  // If a reverse is active the player names the SAME type as the last item (not the opposite)
+  if (roomSnap?.reverseMoveActive) return last.type;
   return last.type === 'actor' ? 'movie' : 'actor';
 }
 
@@ -647,6 +649,64 @@ async function validateAnswer(input, lastItem, usedMovies, usedActors, preSelect
 }
 
 // ============================================================
+//  Reverse-move validation
+// ============================================================
+// Actor → Actor: the answer actor must share at least one movie with the last (actor) chain item.
+// Movie → Movie: the answer movie must share at least one actor with the last (movie) chain item.
+async function validateReverseAnswer(input, lastItem, usedMovies, usedActors, preSelected = null) {
+  if (lastItem.type === 'actor') {
+    // --- Actor → Actor via shared movie ---
+    let personId, personName, imagePath;
+    if (preSelected) {
+      personId = preSelected.tmdbId; personName = preSelected.name; imagePath = preSelected.imagePath;
+    } else {
+      const p = await searchPerson(input);
+      if (!p) return { valid: false, error: `Can't find an actor named "${input}"` };
+      personId = p.id; personName = p.name; imagePath = p.profile_path ?? null;
+    }
+    if (personId === lastItem.tmdbId) return { valid: false, error: "That's the same actor!" };
+    if (usedActors?.[personId]) return { valid: false, error: `${personName} was already used` };
+
+    // Find a movie both actors share
+    const [filmsA, filmsB] = await Promise.all([
+      personFilmography(lastItem.tmdbId),
+      personFilmography(personId)
+    ]);
+    const movieSetA = new Set(filmsA.map(f => f.id));
+    const sharedFilm = filmsB.find(f => movieSetA.has(f.id));
+    if (!sharedFilm) {
+      return { valid: false, error: `${personName} and ${lastItem.name} haven't appeared in a movie together` };
+    }
+    return { valid: true, name: personName, tmdbId: personId, type: 'actor', imagePath, sharedVia: sharedFilm.title };
+
+  } else {
+    // --- Movie → Movie via shared actor ---
+    let movieId, movieTitle, imagePath;
+    if (preSelected) {
+      movieId = preSelected.tmdbId; movieTitle = preSelected.name; imagePath = preSelected.imagePath;
+    } else {
+      const m = await searchMovie(input);
+      if (!m) return { valid: false, error: `Can't find a movie called "${input}"` };
+      movieId = m.id; movieTitle = m.title; imagePath = m.poster_path ?? null;
+    }
+    if (movieId === lastItem.tmdbId) return { valid: false, error: "That's the same movie!" };
+    if (usedMovies?.[movieId]) return { valid: false, error: `"${movieTitle}" was already used` };
+
+    // Find an actor both movies share
+    const [castA, castB] = await Promise.all([
+      movieCast(lastItem.tmdbId),
+      movieCast(movieId)
+    ]);
+    const actorSetA = new Set(castA.map(c => c.id));
+    const sharedActor = castB.find(c => actorSetA.has(c.id));
+    if (!sharedActor) {
+      return { valid: false, error: `"${movieTitle}" and "${lastItem.name}" don't share any cast members` };
+    }
+    return { valid: true, name: movieTitle, tmdbId: movieId, type: 'movie', imagePath, sharedVia: sharedActor.name };
+  }
+}
+
+// ============================================================
 //  Challenge validation
 // ============================================================
 // The challenged player must name ANOTHER connection (not the one that's already in the chain).
@@ -654,8 +714,57 @@ async function validateAnswer(input, lastItem, usedMovies, usedActors, preSelect
 // challenge.answerId   = tmdbId of what they named (the thing to find another connection TO)
 // challenge.prevId     = tmdbId of the prior chain item (must not repeat this)
 async function validateChallengeAnswer(input, challenge, preSelected = null) {
-  const { answerType, answerId, answerName, prevId } = challenge;
+  const { answerType, answerId, answerName, prevId, prevName, isReverse } = challenge;
 
+  // ── Reverse-move challenge ────────────────────────────────────
+  if (isReverse) {
+    if (answerType === 'actor') {
+      // Reverse was actor→actor. To prove: name a MOVIE both actors were in.
+      let movieId, movieTitle;
+      if (preSelected) {
+        movieId = preSelected.tmdbId; movieTitle = preSelected.name;
+      } else {
+        const m = await searchMovie(input);
+        if (!m) return { valid: false, error: `Can't find a movie called "${input}"` };
+        movieId = m.id; movieTitle = m.title;
+      }
+      const [filmsA, filmsB] = await Promise.all([
+        personFilmography(prevId),    // the previous actor
+        personFilmography(answerId)   // the answer actor
+      ]);
+      const inA = filmsA.some(f => f.id === movieId);
+      const inB = filmsB.some(f => f.id === movieId);
+      if (!inA || !inB) {
+        const missing = !inA ? prevName : answerName;
+        return { valid: false, error: `${missing} wasn't in "${movieTitle}"` };
+      }
+      return { valid: true, name: movieTitle };
+
+    } else {
+      // Reverse was movie→movie. To prove: name an ACTOR who was in both movies.
+      let personId, personName;
+      if (preSelected) {
+        personId = preSelected.tmdbId; personName = preSelected.name;
+      } else {
+        const p = await searchPerson(input);
+        if (!p) return { valid: false, error: `Can't find an actor named "${input}"` };
+        personId = p.id; personName = p.name;
+      }
+      const [castA, castB] = await Promise.all([
+        movieCast(prevId),    // the previous movie
+        movieCast(answerId)   // the answer movie
+      ]);
+      const inA = castA.some(c => c.id === personId);
+      const inB = castB.some(c => c.id === personId);
+      if (!inA || !inB) {
+        const missing = !inA ? `"${prevName}"` : `"${answerName}"`;
+        return { valid: false, error: `${personName} wasn't in ${missing}` };
+      }
+      return { valid: true, name: personName };
+    }
+  }
+
+  // ── Normal challenge ──────────────────────────────────────────
   if (answerType === 'movie') {
     // Original answer was a movie → must name another ACTOR from it
     let personId, personName;
@@ -711,6 +820,7 @@ async function createRoom(name) {
     playerOrder: [me.id],
     winner: null, log: {}, fullLog: {},
     pendingChallenge: null, challenge: null,
+    reverseUsed: {}, reverseMoveActive: null,
     word
   });
 
@@ -930,6 +1040,16 @@ function renderGame() {
     document.getElementById('waitingPanel').style.display = 'none';
     renderPrompt();
     renderDots();
+
+    // Reverse button: 2-player only, not yet used, chain has started, not already active
+    const activePlayers     = order.filter(p => !players[p]?.out);
+    const reverseAvailable  = activePlayers.length === 2
+                           && !roomSnap.reverseMoveActive
+                           && !roomSnap.reverseUsed?.[me.id]
+                           && !!roomSnap.lastChainItem;
+    const reverseWrap = document.getElementById('reverseWrap');
+    if (reverseWrap) reverseWrap.style.display = reverseAvailable ? 'block' : 'none';
+
     // Don't steal focus if the player is currently typing in chat
     if (document.activeElement?.id !== 'chatInput') {
       document.getElementById('answerInput').focus();
@@ -938,6 +1058,9 @@ function renderGame() {
     document.getElementById('activeInput').style.display  = 'none';
     document.getElementById('waitingPanel').style.display = 'block';
     document.getElementById('waitingFor').textContent     = curPlayer.name ?? '?';
+    // Always hide reverse button when it's not our turn
+    const reverseWrap = document.getElementById('reverseWrap');
+    if (reverseWrap) reverseWrap.style.display = 'none';
   }
 }
 
@@ -959,11 +1082,22 @@ function renderChallengeUI(challenge, pending, players, myData) {
     if (challenge.challengedId === me.id) {
       // I'm being challenged — show the response input
       response.style.display = 'block';
-      const dir = challenge.answerType === 'movie' ? 'actor' : 'movie';
-      const exclude = challenge.prevName ? ` (not ${challenge.prevName})` : '';
-      document.getElementById('challengePrompt').innerHTML =
-        `<strong>${players[challenge.challengerId]?.name ?? 'Someone'}</strong> is challenging you! ` +
-        `Name another <strong>${dir}</strong> ${challenge.answerType === 'movie' ? `from <strong>${challenge.answerName}</strong>` : `starring <strong>${challenge.answerName}</strong>`}${exclude}`;
+      const challengerName = players[challenge.challengerId]?.name ?? 'Someone';
+      let promptText;
+      if (challenge.isReverse) {
+        // Reverse challenge: prove the co-star / shared-cast link
+        if (challenge.answerType === 'actor') {
+          promptText = `<strong>${challengerName}</strong> is challenging your Reverse! Name a <strong>movie</strong> that both <strong>${challenge.prevName}</strong> and <strong>${challenge.answerName}</strong> appeared in`;
+        } else {
+          promptText = `<strong>${challengerName}</strong> is challenging your Reverse! Name an <strong>actor</strong> who appeared in both <strong>${challenge.prevName}</strong> and <strong>${challenge.answerName}</strong>`;
+        }
+      } else {
+        const dir = challenge.answerType === 'movie' ? 'actor' : 'movie';
+        const exclude = challenge.prevName ? ` (not ${challenge.prevName})` : '';
+        promptText = `<strong>${challengerName}</strong> is challenging you! ` +
+          `Name another <strong>${dir}</strong> ${challenge.answerType === 'movie' ? `from <strong>${challenge.answerName}</strong>` : `starring <strong>${challenge.answerName}</strong>`}${exclude}`;
+      }
+      document.getElementById('challengePrompt').innerHTML = promptText;
       document.getElementById('challengeInput').focus();
     } else {
       // I'm watching (challenger or spectator) — show spinner
@@ -1020,16 +1154,26 @@ function renderChain() {
 }
 
 function renderPrompt() {
-  const last = roomSnap.lastChainItem;
-  const rst  = roomSnap.roundStartType ?? null;
-  const el   = document.getElementById('gamePrompt');
-  const inp  = document.getElementById('answerInput');
+  const last    = roomSnap.lastChainItem;
+  const rst     = roomSnap.roundStartType ?? null;
+  const reverse = roomSnap.reverseMoveActive;
+  const el      = document.getElementById('gamePrompt');
+  const inp     = document.getElementById('answerInput');
   if (!last) {
     if (rst === 'actor') {
       el.innerHTML    = 'Name any <strong>actor</strong> to start the chain';
       inp.placeholder = 'Actor name…';
     } else {
       el.innerHTML    = 'Name any <strong>movie</strong> to start the chain';
+      inp.placeholder = 'Movie title…';
+    }
+  } else if (reverse) {
+    // Reverse-active: same type as last item, connected via co-star / shared cast
+    if (last.type === 'actor') {
+      el.innerHTML    = `🔄 Name another <strong>actor</strong> who has co-starred with <strong>${last.name}</strong>`;
+      inp.placeholder = 'Actor name…';
+    } else {
+      el.innerHTML    = `🔄 Name another <strong>movie</strong> that shares a cast member with <strong>${last.name}</strong>`;
       inp.placeholder = 'Movie title…';
     }
   } else if (last.type === 'movie') {
@@ -1088,10 +1232,16 @@ async function handleSubmit() {
   clearSuggestionsEl('suggestions');
 
   try {
-    const result = await validateAnswer(answer, roomSnap.lastChainItem, roomSnap.usedMovies, roomSnap.usedActors, picked, roomSnap.roundStartType ?? null);
+    const isReverse = !!(roomSnap.reverseMoveActive);
+    const result = isReverse
+      ? await validateReverseAnswer(answer, roomSnap.lastChainItem, roomSnap.usedMovies, roomSnap.usedActors, picked)
+      : await validateAnswer(answer, roomSnap.lastChainItem, roomSnap.usedMovies, roomSnap.usedActors, picked, roomSnap.roundStartType ?? null);
     if (result.valid) {
-      setFeedback('feedback', `✓ ${result.name}`, 'ok');
-      await advanceChain(result);
+      const label = result.sharedVia
+        ? `✓ ${result.name} — via ${result.sharedVia}`
+        : `✓ ${result.name}`;
+      setFeedback('feedback', label, 'ok');
+      await advanceChain(result, isReverse);
     } else {
       setFeedback('feedback', result.error, 'err');
       await handleFailure();
@@ -1105,7 +1255,7 @@ async function handleSubmit() {
   document.getElementById('submitBtn').disabled = false;
 }
 
-async function advanceChain(result) {
+async function advanceChain(result, isReverse = false) {
   const usedMovies = { ...(roomSnap.usedMovies ?? {}) };
   const usedActors = { ...(roomSnap.usedActors ?? {}) };
   if (result.type === 'movie') usedMovies[result.tmdbId] = true;
@@ -1113,7 +1263,12 @@ async function advanceChain(result) {
 
   const logKey  = roomRef.child('log').push().key;
   const nextIdx = nextActiveIndex(roomSnap.currentIdx, roomSnap.players);
-  const entry   = { type: result.type, name: result.name, tmdbId: result.tmdbId, imagePath: result.imagePath ?? null };
+  // Include isReverse flag in the log entry so the chain log can show it distinctly
+  const entry   = {
+    type: result.type, name: result.name, tmdbId: result.tmdbId,
+    imagePath: result.imagePath ?? null,
+    ...(isReverse ? { isReverse: true, sharedVia: result.sharedVia ?? null } : {})
+  };
 
   // Is this the first item of a new round? If so, mark the opener so the
   // opening-move protection rule can fire if the responder can't answer.
@@ -1127,7 +1282,8 @@ async function advanceChain(result) {
     answerName:   result.name,
     answerId:     result.tmdbId,
     prevId:       prev?.tmdbId ?? null,
-    prevName:     prev?.name ?? null
+    prevName:     prev?.name ?? null,
+    ...(isReverse ? { isReverse: true } : {})
   };
 
   await roomRef.update({
@@ -1140,6 +1296,7 @@ async function advanceChain(result) {
     challenge:        null,
     roundChooserPid:  null,
     roundStartType:   null,
+    reverseMoveActive: null,   // clear the reverse flag — move is done
     // Opening-move protection: store opener's id so the responder failure path knows
     openingMoveActive: isOpeningMove ? me.id : null,
     openingRetryMsg:   null   // clear any previous retry message
@@ -1175,6 +1332,7 @@ async function retryOpeningMove(openerPid) {
     pendingChallenge:  null,
     challenge:         null,
     openingMoveActive: null,
+    reverseMoveActive: null,
     // Keep roundStartType so opener goes straight back to naming, not type-picking
     openingRetryMsg:   `${respName} couldn't answer — pick a different ${typeWord}`
   });
@@ -1192,6 +1350,29 @@ async function issueChallenge() {
     challenge:        { ...pending, challengerId: me.id },
     pendingChallenge: null
   });
+}
+
+// ============================================================
+//  Reverse power-up
+// ============================================================
+async function useReverse() {
+  if (!roomSnap) return;
+  const order   = toArray(roomSnap.playerOrder);
+  const players = roomSnap.players ?? {};
+
+  // Guard: must be active 2-player game on my turn, token unspent, chain started, not already active
+  const activePlayers = order.filter(p => !players[p]?.out);
+  if (activePlayers.length !== 2) return;
+  if (order[roomSnap.currentIdx] !== me.id) return;
+  if (roomSnap.reverseUsed?.[me.id]) return;
+  if (!roomSnap.lastChainItem) return;
+  if (roomSnap.reverseMoveActive) return;
+
+  await roomRef.update({
+    [`reverseUsed/${me.id}`]: true,
+    reverseMoveActive: true
+  });
+  // renderGame will fire via the onValue listener and update the prompt automatically
 }
 
 async function revokeChallenge() {
@@ -1297,11 +1478,12 @@ async function assignLetterAndPass(pid) {
   const updates = {
     [`players/${pid}/letters`]: newLetters,
     [`players/${pid}/out`]:     isOut,
-    currentAttempts:   0,
-    challenge:         null,
-    pendingChallenge:  null,
-    openingMoveActive: null,
-    openingRetryMsg:   null
+    currentAttempts:    0,
+    challenge:          null,
+    pendingChallenge:   null,
+    openingMoveActive:  null,
+    openingRetryMsg:    null,
+    reverseMoveActive:  null   // safety: clear any in-flight reverse on letter assignment
   };
 
   if (stillIn.length <= 1) {
@@ -1899,10 +2081,16 @@ function showChainLogModal() {
     } else {
       linkCount++;
       const isMovie = entry.type === 'movie';
-      html += `<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid rgba(255,255,255,0.04);">
+      const reverseTag = entry.isReverse
+        ? `<span style="font-size:0.52rem;font-weight:600;letter-spacing:0.1em;color:#c9a84c;background:rgba(201,168,76,0.12);border:1px solid rgba(201,168,76,0.3);padding:1px 5px;border-radius:2px;margin-left:4px;">🔄 REVERSE</span>`
+        : '';
+      const sharedNote = entry.isReverse && entry.sharedVia
+        ? `<span style="font-size:0.62rem;color:var(--dim);margin-left:4px;">via ${escHtml(entry.sharedVia)}</span>`
+        : '';
+      html += `<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid rgba(255,255,255,0.04);flex-wrap:wrap;">
         <span style="font-size:0.6rem;color:var(--dim);min-width:22px;text-align:right;">${linkCount}</span>
         <span style="font-size:0.72rem;color:${isMovie ? 'var(--dim)' : '#c9a84c'};">${isMovie ? '🎬' : '⭐'}</span>
-        <span style="font-size:0.82rem;color:var(--text);">${escHtml(entry.name ?? '?')}</span>
+        <span style="font-size:0.82rem;color:var(--text);">${escHtml(entry.name ?? '?')}</span>${reverseTag}${sharedNote}
       </div>`;
     }
   }
@@ -2260,6 +2448,9 @@ document.getElementById('challengeInput').addEventListener('input', function () 
   selectedChallengeSuggestion = null;
   debouncedChallengeSearch(this.value.trim());
 });
+
+// Reverse power-up
+document.getElementById('reverseBtn').addEventListener('click', useReverse);
 
 // Challenge buttons
 document.getElementById('challengeBtn').addEventListener('click', issueChallenge);
