@@ -189,10 +189,12 @@ if (!firebaseReady) {
     // Refresh friends cache and start/stop real-time listeners
     if (user) {
       loadMyFriendNames();
+      loadNotifPrefs();
       attachFriendReqListener();
       attachGameInviteListener();
     } else {
       myFriendNames = new Set();
+      _notifPrefs   = { invites: false, turns: false, challenges: false };
       detachFriendReqListener();
       detachGameInviteListener();
       hideFriendReqPopup();
@@ -230,8 +232,14 @@ let _friendReqRef        = null;
 let _friendReqAttachTime = 0;
 
 // Game invite listener state
-let _gameInviteListener = null;
-let _gameInviteRef      = null;
+let _gameInviteListener      = null;
+let _gameInviteNotifCallback = null;   // separate child_added for notifications
+let _gameInviteRef           = null;
+
+// Notification preferences + UI state tracking
+let _notifPrefs     = { invites: false, turns: false, challenges: false };
+let _prevMyTurn     = false;   // was it my turn on last renderGame call?
+let _prevChallenged = false;   // was I being challenged on last renderGame call?
 
 // Practice mode (all local — no Firebase room)
 let practiceChain      = [];
@@ -841,7 +849,12 @@ async function joinRoom(name, code) {
   const snap = await db.ref(`rooms/${code}`).once('value');
   if (!snap.exists()) { alert('Room not found — check the code and try again.'); return; }
   const state = snap.val();
-  if (state.status !== 'waiting') { alert('That game has already started.'); return; }
+
+  // Allow joining a game that just started but where no move has been played yet
+  const preChain = !state.lastChainItem && Object.keys(state.fullLog ?? {}).length === 0;
+  if (state.status === 'finished') { alert('That game has already finished.'); return; }
+  if (state.status === 'playing' && !preChain) { alert('That game is already in progress — you can only join before the first move is made.'); return; }
+
   const order = toArray(state.playerOrder);
   if (order.length >= 4) { alert('That room is full (4 players max).'); return; }
 
@@ -860,7 +873,12 @@ async function joinRoom(name, code) {
   roomRef.onDisconnect().update({ [`players/${me.id}/connected`]: false });
   saveSession();
   attachListener();
-  goLobby();
+  // If game already started, land on the game screen rather than lobby
+  if (state.status === 'playing') {
+    showScreen('screen-game');
+  } else {
+    goLobby();
+  }
 }
 
 // ============================================================
@@ -1077,6 +1095,31 @@ function renderGame() {
     const reverseWrap = document.getElementById('reverseWrap');
     if (reverseWrap) reverseWrap.style.display = 'none';
   }
+
+  // ── Notification triggers ──────────────────────────────────
+  // Turn notification: fire once when it flips to my turn, only if tab not focused
+  const nowMyTurn = isMyTurn && !challenge && !roundChooserPid && !(myData.out);
+  if (nowMyTurn && !_prevMyTurn && !document.hasFocus()) {
+    const lastName = roomSnap.lastChainItem?.name;
+    fireNotificationIfPref(
+      'turns', '🎬 Your turn!',
+      lastName ? `After: ${lastName}` : 'Name any movie to start',
+      'turn'
+    );
+  }
+  _prevMyTurn = nowMyTurn;
+
+  // Challenge notification: fire once when I'm newly challenged
+  const nowChallenged = !!(challenge?.challengedId === me.id);
+  if (nowChallenged && !_prevChallenged && !document.hasFocus()) {
+    const challengerName = players[challenge.challengerId]?.name ?? 'Someone';
+    fireNotificationIfPref(
+      'challenges', '⚡ You\'re being challenged!',
+      `${challengerName} is disputing your last answer`,
+      'challenge'
+    );
+  }
+  _prevChallenged = nowChallenged;
 }
 
 // ── Challenge UI ─────────────────────────────────────────────
@@ -1900,6 +1943,10 @@ async function renderAccountPage() {
 
   // Friends
   await Promise.all([renderFriendsList(), renderFriendRequests()]);
+
+  // Notification prefs
+  await loadNotifPrefs();
+  renderNotifPrefs();
 }
 
 // ============================================================
@@ -2175,17 +2222,108 @@ function attachGameInviteListener() {
   detachGameInviteListener();
   if (!currentUser || !db) return;
   _gameInviteRef = db.ref(`users/${currentUser.uid}/gameInvites`);
+
+  // Display: rebuild the invite card whenever anything changes
   _gameInviteListener = snap => renderGameInvites(snap.val() ?? {});
   _gameInviteRef.on('value', _gameInviteListener);
+
+  // Notifications: only fire for truly new invites (after listener attached)
+  const attachTime = Date.now();
+  _gameInviteNotifCallback = snap => {
+    const inv = snap.val();
+    if (!inv || (inv.sentAt ?? 0) < attachTime) return;
+    fireNotificationIfPref(
+      'invites',
+      `🎬 ${inv.fromName ?? 'Someone'} invited you!`,
+      'Tap to open The Movie Game and join',
+      `invite-${snap.key}`
+    );
+  };
+  _gameInviteRef.on('child_added', _gameInviteNotifCallback);
 }
 
 function detachGameInviteListener() {
-  if (_gameInviteRef && _gameInviteListener) {
-    _gameInviteRef.off('value', _gameInviteListener);
+  if (_gameInviteRef) {
+    if (_gameInviteListener)      _gameInviteRef.off('value',       _gameInviteListener);
+    if (_gameInviteNotifCallback) _gameInviteRef.off('child_added', _gameInviteNotifCallback);
   }
   _gameInviteRef = null;
   _gameInviteListener = null;
-  renderGameInvites({});  // clear the section
+  _gameInviteNotifCallback = null;
+  renderGameInvites({});
+}
+
+// ============================================================
+//  Notification preferences
+// ============================================================
+async function loadNotifPrefs() {
+  _notifPrefs = { invites: false, turns: false, challenges: false };
+  if (!currentUser || !db) return;
+  try {
+    const snap = await db.ref(`users/${currentUser.uid}/notifPrefs`).once('value');
+    const s = snap.val() ?? {};
+    _notifPrefs = { invites: !!s.invites, turns: !!s.turns, challenges: !!s.challenges };
+  } catch (_) {}
+}
+
+async function saveNotifPref(key, value) {
+  _notifPrefs[key] = value;
+  if (!currentUser || !db) return;
+  await db.ref(`users/${currentUser.uid}/notifPrefs/${key}`).set(value).catch(() => {});
+}
+
+async function requestNotifPermission() {
+  if (!('Notification' in window)) return 'unsupported';
+  if (Notification.permission === 'granted') return 'granted';
+  if (Notification.permission === 'denied')  return 'denied';
+  return Notification.requestPermission();
+}
+
+function fireNotificationIfPref(prefKey, title, body, tag) {
+  if (!_notifPrefs[prefKey]) return;
+  if (!('Notification' in window) || Notification.permission !== 'granted') return;
+  try {
+    const n = new Notification(title, { body, tag, icon: '/icon-192.png', silent: false });
+    n.onclick = () => { window.focus(); n.close(); };
+  } catch (_) {}
+}
+
+function renderNotifPrefs() {
+  const statusEl  = document.getElementById('notifPermStatus');
+  const permBtn   = document.getElementById('notifPermBtn');
+  const togglesEl = document.getElementById('notifToggles');
+  if (!statusEl) return;
+
+  const supported = 'Notification' in window;
+  const perm      = supported ? Notification.permission : 'unsupported';
+
+  if (!supported) {
+    statusEl.textContent  = 'Notifications are not supported in this browser.';
+    statusEl.style.color  = 'var(--dim)';
+    if (permBtn)   permBtn.style.display = 'none';
+    if (togglesEl) { togglesEl.style.opacity = '0.35'; togglesEl.style.pointerEvents = 'none'; }
+  } else if (perm === 'granted') {
+    statusEl.textContent  = '✓ Notifications enabled';
+    statusEl.style.color  = 'var(--ok)';
+    if (permBtn)   permBtn.style.display = 'none';
+    if (togglesEl) { togglesEl.style.opacity = '1'; togglesEl.style.pointerEvents = ''; }
+  } else if (perm === 'denied') {
+    statusEl.textContent  = 'Blocked — enable notifications in your browser / device settings.';
+    statusEl.style.color  = 'var(--red)';
+    if (permBtn)   permBtn.style.display = 'none';
+    if (togglesEl) { togglesEl.style.opacity = '0.35'; togglesEl.style.pointerEvents = 'none'; }
+  } else {
+    statusEl.textContent  = '';
+    if (permBtn)   permBtn.style.display = 'block';
+    if (togglesEl) { togglesEl.style.opacity = '0.35'; togglesEl.style.pointerEvents = 'none'; }
+  }
+
+  // Sync checkboxes with stored prefs
+  const ids = { invites: 'notifInvites', turns: 'notifTurns', challenges: 'notifChallenges' };
+  for (const [key, id] of Object.entries(ids)) {
+    const el = document.getElementById(id);
+    if (el) el.checked = !!_notifPrefs[key];
+  }
 }
 
 function renderGameInvites(invites) {
@@ -2687,6 +2825,42 @@ document.getElementById('acctNameInput').addEventListener('keydown', function (e
   if (e.key === 'Enter') this.blur();
 });
 
+// Notification preferences
+document.getElementById('notifPermBtn').addEventListener('click', async () => {
+  const result = await requestNotifPermission();
+  if (result === 'denied') {
+    showToast('Notifications blocked — enable them in browser settings', 'err');
+  }
+  renderNotifPrefs();
+});
+
+async function handleNotifToggle(key, checked) {
+  if (checked && Notification.permission !== 'granted') {
+    const result = await requestNotifPermission();
+    if (result !== 'granted') {
+      // Revert the checkbox
+      const ids = { invites: 'notifInvites', turns: 'notifTurns', challenges: 'notifChallenges' };
+      const el = document.getElementById(ids[key]);
+      if (el) el.checked = false;
+      showToast('Allow notifications first, then try again', 'err');
+      renderNotifPrefs();
+      return;
+    }
+  }
+  await saveNotifPref(key, checked);
+  renderNotifPrefs();
+}
+
+document.getElementById('notifInvites').addEventListener('change', function () {
+  handleNotifToggle('invites', this.checked);
+});
+document.getElementById('notifTurns').addEventListener('change', function () {
+  handleNotifToggle('turns', this.checked);
+});
+document.getElementById('notifChallenges').addEventListener('change', function () {
+  handleNotifToggle('challenges', this.checked);
+});
+
 // Friends — account page
 document.getElementById('acctAddFriendBtn').addEventListener('click', sendFriendRequest);
 document.getElementById('acctAddFriendInput').addEventListener('keydown', e => { if (e.key === 'Enter') sendFriendRequest(); });
@@ -2895,6 +3069,7 @@ document.getElementById('playAgainBtn').addEventListener('click', () => {
   if (listener) roomRef.off('value', listener);
   roomSnap = null; roomId = null; roomRef = null; isHost = false; listener = null;
   chatAttached = false; lastSeenChallengeTs = 0; gameStatsWritten = false; lastLogLength = -1;
+  _prevMyTurn = false; _prevChallenged = false;
   clearSession();
   document.getElementById('chatMessages').innerHTML = '';
   setFeedback('feedback', '', '');

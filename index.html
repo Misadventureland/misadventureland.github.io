@@ -498,6 +498,14 @@
     .game-name-input:focus { border-bottom-color: var(--red); }
     .game-name-input::placeholder { color: var(--dim); }
 
+    /* ── Notification toggle switch ── */
+    .notif-toggle { position:relative; display:inline-block; width:42px; height:25px; flex-shrink:0; }
+    .notif-toggle input { opacity:0; width:0; height:0; position:absolute; }
+    .notif-slider { position:absolute; inset:0; background:var(--bd2); border-radius:25px; cursor:pointer; transition:background 0.2s; }
+    .notif-slider::before { content:''; position:absolute; width:19px; height:19px; left:3px; top:3px; background:#fff; border-radius:50%; transition:transform 0.2s; }
+    .notif-toggle input:checked + .notif-slider { background:var(--ok); }
+    .notif-toggle input:checked + .notif-slider::before { transform:translateX(17px); }
+
     /* ── Account page stat tiles ── */
     .stat-tile {
       background: var(--s2);
@@ -973,6 +981,39 @@
       <div class="stat-tile">
         <div class="stat-value" id="acctWinRate">—</div>
         <div class="stat-label">Win Rate</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Notification preferences -->
+  <div class="card" style="margin-bottom:10px;">
+    <label style="margin-bottom:6px;">Notifications</label>
+    <p id="notifPermStatus" style="font-size:0.62rem;color:var(--dim);min-height:1em;margin-bottom:6px;"></p>
+    <button id="notifPermBtn" style="display:none;background:none;border:1px solid var(--bd2);color:var(--dim);font-size:0.6rem;font-weight:600;letter-spacing:0.14em;text-transform:uppercase;cursor:pointer;font-family:inherit;padding:8px 14px;width:100%;transition:border-color 0.15s,color 0.15s;margin-bottom:10px;" onmouseover="this.style.borderColor='var(--text)';this.style.color='var(--text)'" onmouseout="this.style.borderColor='var(--bd2)';this.style.color='var(--dim)'">Enable Notifications</button>
+    <div id="notifToggles" style="opacity:0.35;pointer-events:none;">
+      <!-- Tier 1 -->
+      <div style="display:flex;align-items:center;gap:12px;padding:11px 0;border-bottom:1px solid var(--bd);">
+        <div style="flex:1;">
+          <div style="font-size:0.88rem;color:var(--text);">🎮 Game invites</div>
+          <div style="font-size:0.58rem;color:var(--dim);margin-top:2px;">When a friend invites you to play</div>
+        </div>
+        <label class="notif-toggle"><input type="checkbox" id="notifInvites"><span class="notif-slider"></span></label>
+      </div>
+      <!-- Tier 2 -->
+      <div style="display:flex;align-items:center;gap:12px;padding:11px 0;border-bottom:1px solid var(--bd);">
+        <div style="flex:1;">
+          <div style="font-size:0.88rem;color:var(--text);">🎬 Your turn</div>
+          <div style="font-size:0.58rem;color:var(--dim);margin-top:2px;">When the chain moves to you</div>
+        </div>
+        <label class="notif-toggle"><input type="checkbox" id="notifTurns"><span class="notif-slider"></span></label>
+      </div>
+      <!-- Tier 3 -->
+      <div style="display:flex;align-items:center;gap:12px;padding:11px 0;">
+        <div style="flex:1;">
+          <div style="font-size:0.88rem;color:var(--text);">⚡ Challenges</div>
+          <div style="font-size:0.58rem;color:var(--dim);margin-top:2px;">When your answer is disputed</div>
+        </div>
+        <label class="notif-toggle"><input type="checkbox" id="notifChallenges"><span class="notif-slider"></span></label>
       </div>
     </div>
   </div>
