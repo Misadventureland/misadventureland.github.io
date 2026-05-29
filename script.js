@@ -60,7 +60,36 @@ const QUOTES = [
 
 const TMDB_KEY  = '7ae222abae7a3ddc86b2deb7e8542a4a';
 const TMDB_BASE = 'https://api.themoviedb.org/3';
-const WORD      = 'MOVIE';
+// activeWord() reads the per-room word (fetched at room creation from TMDB).
+// Falls back to 'MOVIE' if the room was created before this feature or fetch failed.
+function activeWord() { return roomSnap?.word ?? 'MOVIE'; }
+
+// Fallback pool used when TMDB yields nothing suitable
+const _WORD_FALLBACKS = [
+  'ALIEN','TENET','JOKER','ROCKY','SHREK','FARGO','CRASH',
+  'DRIVE','BLADE','TAKEN','BAMBI','SPEED','GHOST','TWINS',
+  'SULLY','FOCUS','BELLE','CRANK','DINER','LUCKY'
+];
+
+async function fetchRandomWord() {
+  try {
+    const candidates = new Set();
+    for (let page = 1; page <= 4 && candidates.size < 25; page++) {
+      const data = await tmdbFetch('/discover/movie', {
+        sort_by: 'popularity.desc',
+        'vote_count.gte': 800,
+        page
+      });
+      for (const m of data.results ?? []) {
+        if (/^[A-Za-z]{5}$/.test(m.title)) candidates.add(m.title.toUpperCase());
+      }
+    }
+    const pool = [...candidates];
+    if (pool.length > 0) return pool[Math.floor(Math.random() * pool.length)];
+  } catch (_) {}
+  // Fallback: pick from the hardcoded list
+  return _WORD_FALLBACKS[Math.floor(Math.random() * _WORD_FALLBACKS.length)];
+}
 
 // ── Winner quotes ─────────────────────────────────────────────
 const WINNER_QUOTES = [
@@ -156,6 +185,15 @@ if (!firebaseReady) {
     if (user && nameInput && !nameInput.value.trim()) {
       nameInput.value = user.displayName ?? '';
     }
+    // Refresh friends cache and start/stop real-time request listener
+    if (user) {
+      loadMyFriendNames();
+      attachFriendReqListener();
+    } else {
+      myFriendNames = new Set();
+      detachFriendReqListener();
+      hideFriendReqPopup();
+    }
   });
 }
 
@@ -178,6 +216,15 @@ let overlayTimer              = null;
 let currentUser       = null;
 let gameStatsWritten  = false;
 let lastLogLength     = -1;   // -1 = haven't entered game yet; tracks chain length for ding
+
+// Friends cache — Set of lowercased game names; updated on sign-in/friend ops
+let myFriendNames = new Set();
+
+// Friend request popup state
+let _pendingFriendReq    = null;  // { uid, name }
+let _friendReqCallback   = null;  // Firebase onChildAdded handler
+let _friendReqRef        = null;
+let _friendReqAttachTime = 0;
 
 // Practice mode (all local — no Firebase room)
 let practiceChain      = [];
@@ -652,6 +699,9 @@ async function createRoom(name) {
   gameStatsWritten = false;
   roomRef = db.ref(`rooms/${roomId}`);
 
+  // Fetch a random 5-letter movie title to use as the scoring word for this game
+  const word = await fetchRandomWord();
+
   await roomRef.set({
     hostId: me.id, status: 'waiting',
     currentIdx: 0, currentAttempts: 0,
@@ -659,8 +709,9 @@ async function createRoom(name) {
     usedMovies: {}, usedActors: {},
     players: { [me.id]: { name, letters: '', order: 0, out: false } },
     playerOrder: [me.id],
-    winner: null, log: {},
-    pendingChallenge: null, challenge: null
+    winner: null, log: {}, fullLog: {},
+    pendingChallenge: null, challenge: null,
+    word
   });
 
   roomRef.onDisconnect().update({ [`players/${me.id}/connected`]: false });
@@ -741,7 +792,7 @@ function renderLobby() {
         ${pid === roomSnap.hostId ? '<span class="host-badge">HOST</span>' : ''}
         ${pid === me.id ? '<span class="me-badge">(you)</span>' : ''}
       </span>
-      ${canAdd ? `<button data-add-friend="${escHtml(p.name ?? '')}"
+      ${canAdd && !myFriendNames.has((p.name ?? '').toLowerCase()) ? `<button data-add-friend="${escHtml(p.name ?? '')}"
         style="background:none;border:none;color:var(--dim);font-size:0.54rem;font-weight:600;letter-spacing:0.14em;text-transform:uppercase;cursor:pointer;font-family:inherit;padding:3px 0;white-space:nowrap;"
         onmouseover="this.style.color='var(--ok)'" onmouseout="this.style.color='var(--dim)'">+ Add</button>` : ''}
     </li>`;
@@ -824,6 +875,13 @@ function renderGame() {
   const logLen = Object.keys(roomSnap.log ?? {}).length;
   if (lastLogLength >= 0 && logLen > lastLogLength) playDing();
   lastLogLength = logLen;
+
+  // Chain length badge (current round links + all-time across rounds)
+  const fullLogLen = Object.keys(roomSnap.fullLog ?? {})
+    .filter(k => (roomSnap.fullLog[k]?.type ?? '') !== 'round-end').length;
+  const totalLinks = fullLogLen + logLen;
+  const badgeEl = document.getElementById('chainLengthBadge');
+  if (badgeEl) badgeEl.textContent = totalLinks > 0 ? `${logLen} this round · ${totalLinks} total` : '';
 
   renderScores(order, players, curPid);
   renderChallengeUI(challenge, pending, players, myData);
@@ -993,7 +1051,8 @@ function renderDots() {
 function renderScores(order, players, curPid) {
   document.getElementById('scores').innerHTML = order.map(pid => {
     const p      = players[pid] ?? {};
-    const canAdd = currentUser && pid !== me.id;
+    const canAdd = currentUser && pid !== me.id
+                   && !myFriendNames.has((p.name ?? '').toLowerCase());
     return `<div class="score-card ${pid === curPid ? 'active-turn' : ''} ${p.out ? 'out' : ''}">
       <div class="score-name">${p.name ?? '?'}</div>
       <div class="score-letters">${p.letters || ' '}</div>
@@ -1002,6 +1061,9 @@ function renderScores(order, players, curPid) {
         onmouseover="this.style.color='var(--ok)'" onmouseout="this.style.color='var(--dim)'">+ add</button>` : ''}
     </div>`;
   }).join('');
+  // Word indicator below scores
+  const wordEl = document.getElementById('wordIndicator');
+  if (wordEl) wordEl.textContent = `Spelling: ${activeWord()}`;
 }
 
 // ============================================================
@@ -1196,7 +1258,7 @@ async function resolveChallenge(loserPid, winningAnswer = null) {
     const winnerPid   = loserPid === challenge.challengerId ? challenge.challengedId : challenge.challengerId;
     const loserName   = players[loserPid]?.name  ?? '?';
     const winnerName  = players[winnerPid]?.name ?? '?';
-    const loserLetter = WORD[(players[loserPid]?.letters ?? '').length] ?? '?';
+    const loserLetter = activeWord()[(players[loserPid]?.letters ?? '').length] ?? '?';
 
     await roomRef.update({
       challenge:           null,
@@ -1221,8 +1283,9 @@ async function resolveChallenge(loserPid, winningAnswer = null) {
 async function assignLetterAndPass(pid) {
   const players    = roomSnap.players ?? {};
   const myLetters  = players[pid]?.letters ?? '';
-  const newLetters = myLetters + WORD[myLetters.length];
-  const isOut      = newLetters.length >= WORD.length;
+  const word       = activeWord();
+  const newLetters = myLetters + word[myLetters.length];
+  const isOut      = newLetters.length >= word.length;
 
   const order = toArray(roomSnap.playerOrder);
   const updatedPlayers = {
@@ -1242,10 +1305,22 @@ async function assignLetterAndPass(pid) {
   };
 
   if (stillIn.length <= 1) {
+    // Game over — flush remaining log entries to fullLog before finishing
+    const finalLog = roomSnap.log ?? {};
+    Object.entries(finalLog).forEach(([k, v]) => { updates[`fullLog/${k}`] = v; });
     updates.status = 'finished';
     updates.winner = stillIn[0] ?? null;
   } else {
-    // Round restart: clear the chain, let the letter-getter pick the starting type
+    // Round restart: archive current round to fullLog then clear the chain
+    const currentLog = roomSnap.log ?? {};
+    Object.entries(currentLog).forEach(([k, v]) => { updates[`fullLog/${k}`] = v; });
+    // Add a round-end marker so the log viewer can show round breaks
+    const markerKey = db.ref().push().key;
+    updates[`fullLog/${markerKey}`] = {
+      type:      'round-end',
+      loserName: players[pid]?.name ?? '?',
+      letter:    newLetters[newLetters.length - 1]
+    };
     const chooserIdx = order.indexOf(pid);
     updates.roundChooserPid  = pid;
     updates.roundStartType   = null;
@@ -1291,7 +1366,7 @@ async function leaveGame() {
 
   const updates = {
     [`players/${me.id}/out`]:     true,
-    [`players/${me.id}/letters`]: WORD,
+    [`players/${me.id}/letters`]: activeWord(),
     currentAttempts: 0,
     challenge:        null,
     pendingChallenge: null
@@ -1349,7 +1424,8 @@ function renderGameOver() {
   document.getElementById('finalScores').innerHTML = order.map(pid => {
     const p      = players[pid] ?? {};
     const w      = pid === winnerId;
-    const canAdd = currentUser && pid !== me.id;
+    const canAdd = currentUser && pid !== me.id
+                   && !myFriendNames.has((p.name ?? '').toLowerCase());
     return `<div class="score-row" style="align-items:center;">
       <span style="color:${w ? '#ede9e3' : '#4a4a4a'};font-weight:${w ? '600' : '400'};flex:1;">${p.name ?? '?'}${w ? ' ◆' : ''}</span>
       <span style="color:#c0182b;letter-spacing:.1em;font-weight:700;margin-right:${canAdd ? '10px' : '0'}">${p.letters || '—'}</span>
@@ -1655,6 +1731,7 @@ async function acceptFriendRequest(fromUid, fromName) {
     db.ref(`users/${fromUid}/friends/${currentUser.uid}`).set({ name: myName, addedAt: Date.now() }),
     db.ref(`users/${currentUser.uid}/friendRequests/${fromUid}`).remove()
   ]);
+  await loadMyFriendNames();
   await Promise.all([renderFriendsList(), renderFriendRequests()]);
 }
 
@@ -1671,6 +1748,7 @@ async function removeFriend(friendUid) {
     db.ref(`users/${currentUser.uid}/friends/${friendUid}`).remove(),
     db.ref(`users/${friendUid}/friends/${currentUser.uid}`).remove()
   ]);
+  await loadMyFriendNames();
   await renderFriendsList();
 }
 
@@ -1728,6 +1806,117 @@ async function addFriendInGame(playerName) {
   } catch (_) {
     showToast('Something went wrong — try again', 'err');
   }
+}
+
+// ============================================================
+//  Friends cache loader
+// ============================================================
+async function loadMyFriendNames() {
+  if (!currentUser || !db) { myFriendNames = new Set(); return; }
+  try {
+    const snap = await db.ref(`users/${currentUser.uid}/friends`).once('value');
+    const friends = snap.val() ?? {};
+    myFriendNames = new Set(Object.values(friends).map(f => (f.name ?? '').toLowerCase()));
+  } catch (_) { myFriendNames = new Set(); }
+}
+
+// ============================================================
+//  Real-time friend request listener
+// ============================================================
+function attachFriendReqListener() {
+  detachFriendReqListener();
+  if (!currentUser || !db) return;
+  _friendReqAttachTime = Date.now();
+  _friendReqRef = db.ref(`users/${currentUser.uid}/friendRequests`);
+  // Keep a reference to the bound handler so we can detach it precisely
+  _friendReqCallback = snap => {
+    if (!snap.exists()) return;
+    const data = snap.val();
+    // Ignore requests that were already in the database when we attached
+    if ((data.sentAt ?? 0) < _friendReqAttachTime) return;
+    showFriendReqPopup(snap.key, data.name ?? 'Someone');
+  };
+  _friendReqRef.on('child_added', _friendReqCallback);
+}
+
+function detachFriendReqListener() {
+  if (_friendReqRef && _friendReqCallback) {
+    _friendReqRef.off('child_added', _friendReqCallback);
+  }
+  _friendReqRef = null;
+  _friendReqCallback = null;
+}
+
+// ============================================================
+//  Friend request popup
+// ============================================================
+function showFriendReqPopup(fromUid, fromName) {
+  _pendingFriendReq = { uid: fromUid, name: fromName };
+  const popup = document.getElementById('friendReqPopup');
+  const msg   = document.getElementById('friendReqPopupMsg');
+  if (!popup || !msg) return;
+  msg.textContent = `${fromName} sent you a friend request`;
+  popup.style.display = 'flex';
+}
+
+function hideFriendReqPopup() {
+  _pendingFriendReq = null;
+  const popup = document.getElementById('friendReqPopup');
+  if (popup) popup.style.display = 'none';
+}
+
+// ============================================================
+//  Chain log modal
+// ============================================================
+function showChainLogModal() {
+  if (!roomSnap) return;
+  const modal   = document.getElementById('chainLogModal');
+  const content = document.getElementById('chainLogContent');
+  const counter = document.getElementById('chainLogTotalCount');
+  if (!modal || !content) return;
+
+  const fullLog    = roomSnap.fullLog ?? {};
+  const currentLog = roomSnap.log     ?? {};
+
+  // Merge: fullLog (archived rounds) then current round entries
+  // Sort each set by Firebase push-key (lexicographic == chronological)
+  const sortedFull    = Object.entries(fullLog).sort(([a], [b]) => a < b ? -1 : 1);
+  const sortedCurrent = Object.entries(currentLog).sort(([a], [b]) => a < b ? -1 : 1);
+  const allEntries    = [...sortedFull, ...sortedCurrent];
+
+  let roundNum = 1;
+  let linkCount = 0;
+  let html = '';
+
+  for (const [, entry] of allEntries) {
+    if (!entry || typeof entry !== 'object') continue;
+
+    if (entry.type === 'round-end') {
+      html += `<div style="margin:10px 0 6px;padding:6px 10px;background:rgba(192,24,43,0.15);border-left:2px solid var(--red);border-radius:3px;font-size:0.7rem;color:var(--dim);">
+        ✗ ${escHtml(entry.loserName ?? '?')} earned <strong style="color:#c0182b;">${escHtml(entry.letter ?? '?')}</strong> — Round ${roundNum} ends
+      </div>`;
+      roundNum++;
+    } else {
+      linkCount++;
+      const isMovie = entry.type === 'movie';
+      html += `<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid rgba(255,255,255,0.04);">
+        <span style="font-size:0.6rem;color:var(--dim);min-width:22px;text-align:right;">${linkCount}</span>
+        <span style="font-size:0.72rem;color:${isMovie ? 'var(--dim)' : '#c9a84c'};">${isMovie ? '🎬' : '⭐'}</span>
+        <span style="font-size:0.82rem;color:var(--text);">${escHtml(entry.name ?? '?')}</span>
+      </div>`;
+    }
+  }
+
+  if (!html) {
+    html = '<p style="color:var(--dim);font-size:0.82rem;padding:16px 0;text-align:center;">The chain will appear here once the game starts.</p>';
+  }
+
+  content.innerHTML = html;
+  if (counter) counter.textContent = linkCount > 0 ? `${linkCount} link${linkCount !== 1 ? 's' : ''} total` : '';
+  modal.style.display = 'block';
+
+  // Scroll to bottom so latest is visible
+  modal.scrollTop = modal.scrollHeight;
 }
 
 // ============================================================
@@ -1936,6 +2125,32 @@ document.getElementById('acctNameInput').addEventListener('keydown', function (e
 // Friends — account page
 document.getElementById('acctAddFriendBtn').addEventListener('click', sendFriendRequest);
 document.getElementById('acctAddFriendInput').addEventListener('keydown', e => { if (e.key === 'Enter') sendFriendRequest(); });
+
+// Friend request popup
+document.getElementById('friendReqPopupAccept').addEventListener('click', async () => {
+  const req = _pendingFriendReq;
+  hideFriendReqPopup();
+  if (req) {
+    await acceptFriendRequest(req.uid, req.name);
+    showToast(`You and ${req.name} are now friends!`, 'ok');
+  }
+});
+document.getElementById('friendReqPopupDismiss').addEventListener('click', hideFriendReqPopup);
+document.getElementById('friendReqPopupView').addEventListener('click', () => {
+  hideFriendReqPopup();
+  showAccount();
+});
+
+// Chain log modal
+document.getElementById('viewChainLogBtn').addEventListener('click', showChainLogModal);
+document.getElementById('chainLogCloseBtn').addEventListener('click', () => {
+  const modal = document.getElementById('chainLogModal');
+  if (modal) modal.style.display = 'none';
+});
+// Also close on backdrop click
+document.getElementById('chainLogModal').addEventListener('click', function (e) {
+  if (e.target === this) this.style.display = 'none';
+});
 
 // Practice — landing entry
 document.getElementById('practiceBtn').addEventListener('click', enterPractice);

@@ -2,8 +2,15 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>The Movie Game</title>
+  <!-- PWA / home-screen install -->
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#080808">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Movie Game">
+  <link rel="apple-touch-icon" href="icon-192.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&display=swap" rel="stylesheet">
@@ -694,6 +701,15 @@
     </div>
   </div>
 
+  <!-- Chain header: length counter + view-all button -->
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;padding:0 2px;">
+    <span style="font-size:0.58rem;font-weight:600;letter-spacing:0.22em;text-transform:uppercase;color:var(--dim);">Chain</span>
+    <div style="display:flex;align-items:center;gap:14px;">
+      <span id="chainLengthBadge" style="font-size:0.68rem;color:var(--dim);letter-spacing:0.06em;"></span>
+      <button id="viewChainLogBtn" style="background:none;border:none;color:var(--dim);font-size:0.58rem;font-weight:600;letter-spacing:0.14em;text-transform:uppercase;cursor:pointer;font-family:inherit;padding:0;" onmouseover="this.style.color='var(--text)'" onmouseout="this.style.color='var(--dim)'">View all ↗</button>
+    </div>
+  </div>
+
   <div class="chain-box" id="chainBox">
     <div style="color:#333;font-size:.85rem;">The chain will appear here&hellip;</div>
   </div>
@@ -781,6 +797,7 @@
   </div>
 
   <div class="scores" id="scores"></div>
+  <p id="wordIndicator" style="text-align:center;font-size:0.54rem;color:var(--dim);letter-spacing:0.32em;text-transform:uppercase;margin-top:8px;margin-bottom:0;"></p>
 
   <!-- Chat -->
   <div class="chat-section">
@@ -1029,6 +1046,33 @@
 
 <!-- Toast notification -->
 <div id="toast" style="display:none;position:fixed;bottom:32px;left:50%;transform:translateX(-50%);padding:11px 22px;font-size:0.75rem;font-weight:500;letter-spacing:0.04em;z-index:3000;text-align:center;max-width:300px;pointer-events:none;transition:opacity 0.25s ease;font-family:'Space Grotesk',sans-serif;"></div>
+
+<!-- Friend request popup (slides in from top) -->
+<div id="friendReqPopup" style="display:none;position:fixed;top:16px;left:50%;transform:translateX(-50%);max-width:360px;width:calc(100% - 32px);background:var(--s1);border:1px solid var(--bd2);border-left:3px solid var(--ok);padding:14px 16px;z-index:2600;font-family:'Space Grotesk',sans-serif;transition:opacity 0.25s ease;">
+  <div style="font-size:0.56rem;font-weight:700;letter-spacing:0.24em;text-transform:uppercase;color:var(--ok);margin-bottom:8px;">Friend Request</div>
+  <div style="display:flex;align-items:center;gap:10px;">
+    <span id="friendReqPopupMsg" style="flex:1;font-size:0.86rem;color:var(--text);line-height:1.4;"></span>
+    <button id="friendReqPopupAccept" style="background:var(--ok);color:#fff;border:none;padding:7px 13px;font-size:0.6rem;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;cursor:pointer;font-family:inherit;white-space:nowrap;flex-shrink:0;">Accept</button>
+    <button id="friendReqPopupDismiss" style="background:none;border:1px solid var(--bd2);color:var(--dim);padding:7px 10px;font-size:0.78rem;cursor:pointer;font-family:inherit;flex-shrink:0;">×</button>
+  </div>
+  <div style="margin-top:8px;text-align:right;">
+    <button id="friendReqPopupView" style="background:none;border:none;color:var(--dim);font-size:0.52rem;font-weight:500;letter-spacing:0.14em;text-transform:uppercase;cursor:pointer;font-family:inherit;padding:0;" onmouseover="this.style.color='var(--text)'" onmouseout="this.style.color='var(--dim)'">View in Account →</button>
+  </div>
+</div>
+
+<!-- Full chain log modal -->
+<div id="chainLogModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.97);z-index:1001;overflow-y:auto;-webkit-overflow-scrolling:touch;">
+  <div style="max-width:520px;margin:0 auto;padding:28px 20px 80px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px;padding-bottom:16px;border-bottom:1px solid var(--bd);">
+      <div>
+        <span style="font-size:0.6rem;font-weight:600;letter-spacing:0.22em;text-transform:uppercase;color:var(--dim);">Full Chain Log</span>
+        <span id="chainLogTotalCount" style="font-size:0.65rem;color:var(--dim);margin-left:12px;letter-spacing:0.06em;"></span>
+      </div>
+      <button id="chainLogCloseBtn" style="background:none;border:none;color:var(--dim);font-size:1.4rem;cursor:pointer;padding:0;line-height:1;font-family:inherit;" onmouseover="this.style.color='var(--text)'" onmouseout="this.style.color='var(--dim)'">×</button>
+    </div>
+    <div id="chainLogContent"></div>
+  </div>
+</div>
 
 <!-- Firebase Realtime Database SDK (compat) -->
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
