@@ -24,8 +24,9 @@
       --bd:   #1a1a1a;
       --bd2:  #282828;
       --text: #ede9e3;
-      --dim:  #4a4a4a;
-      --dim2: #282828;
+      --dim:      #6a6661;   /* secondary text — labels, hints, badges */
+      --dim-deep: #383432;   /* purely decorative marks — list bullets etc. */
+      --dim2:     #282828;   /* spent/receded elements — crossed-off dots */
       --red:  #c0182b;
       --ok:   #3aaa68;
     }
@@ -218,7 +219,7 @@
       font-weight: 400;
     }
     .players-list li:last-child { border-bottom: none; }
-    .players-list li::before { content: '—'; color: var(--dim); font-size: 0.65rem; }
+    .players-list li::before { content: '—'; color: var(--dim-deep); font-size: 0.65rem; }
     .host-badge {
       font-size: 0.56rem;
       font-weight: 600;
@@ -561,7 +562,7 @@
       gap: 6px;
       margin-bottom: 12px;
     }
-    .chat-msg { font-size: 0.82rem; color: #4a4a4a; line-height: 1.5; word-break: break-word; }
+    .chat-msg { font-size: 0.82rem; color: var(--dim); line-height: 1.5; word-break: break-word; }
     .chat-msg .chat-name { color: var(--text); font-weight: 600; margin-right: 6px; }
     .chat-msg.mine .chat-name { color: var(--red); }
     .chat-input-row { display: flex; gap: 8px; }
@@ -597,7 +598,7 @@
     #challengeOverlay.open { display: flex; }
     .co-icon { font-size: 2.8rem; margin-bottom: 18px; }
     .co-title { font-size: 1.5rem; font-weight: 700; color: var(--text); letter-spacing: 0.12em; text-transform: uppercase; margin-bottom: 14px; }
-    .co-sub { font-size: 0.88rem; color: #4a4a4a; line-height: 1.9; max-width: 320px; }
+    .co-sub { font-size: 0.88rem; color: var(--dim); line-height: 1.9; max-width: 320px; }
     .co-answer { margin-top: 20px; padding: 10px 24px; border: 1px solid var(--bd2); font-size: 0.95rem; font-weight: 500; color: var(--text); }
     .co-dismiss { margin-top: 28px; font-size: 0.6rem; color: var(--dim2); letter-spacing: 0.2em; text-transform: uppercase; font-weight: 500; }
   </style>
@@ -676,7 +677,7 @@
   <div class="card">
     <label>Players (<span id="playerCount">0</span> / 4)</label>
     <ul class="players-list" id="playersList"></ul>
-    <p id="lobbyWait" style="font-size:0.72rem;color:#3a3a3a;margin-top:14px;text-align:center;letter-spacing:0.06em;">
+    <p id="lobbyWait" style="font-size:0.72rem;color:var(--dim);margin-top:14px;text-align:center;letter-spacing:0.06em;">
       Waiting for more players to join&hellip;
     </p>
   </div>
@@ -697,7 +698,7 @@
     </div>
     <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;">
       <div class="room-tag">Room: <span id="gameCode"></span></div>
-      <button id="leaveBtn" style="background:none;border:none;color:#3a3a3a;font-size:0.62rem;letter-spacing:0.14em;cursor:pointer;font-family:inherit;text-transform:uppercase;padding:0;font-weight:500;">Leave</button>
+      <button id="leaveBtn" style="background:none;border:none;color:var(--dim);font-size:0.62rem;letter-spacing:0.14em;cursor:pointer;font-family:inherit;text-transform:uppercase;padding:0;font-weight:500;" onmouseover="this.style.color='#c0182b'" onmouseout="this.style.color='var(--dim)'">Leave</button>
     </div>
   </div>
 
@@ -711,7 +712,7 @@
   </div>
 
   <div class="chain-box" id="chainBox">
-    <div style="color:#333;font-size:.85rem;">The chain will appear here&hellip;</div>
+    <div style="color:var(--dim);font-size:.85rem;">The chain will appear here&hellip;</div>
   </div>
 
   <!-- ── Opening retry notice ── shown to all when opener must re-pick ── -->
@@ -733,7 +734,7 @@
     <button id="challengeBtn" class="btn btn-outline" style="font-size:0.82rem; padding:10px 16px;">
       <span id="challengeBtnLabel">⚡ Challenge</span>
     </button>
-    <p id="challengeBtnHint" style="font-size:0.7rem; color:#555; margin-top:6px;"></p>
+    <p id="challengeBtnHint" style="font-size:0.7rem; color:var(--dim); margin-top:6px;"></p>
   </div>
 
   <!-- Challenge response — shown to the player who is being challenged -->
@@ -751,7 +752,7 @@
     </div>
     <div class="feedback" id="challengeFeedback"></div>
     <div style="text-align:center;margin-top:12px;">
-      <button id="challengeGiveUpBtn" style="background:none;border:none;color:#333;font-size:0.62rem;font-weight:500;letter-spacing:0.14em;cursor:pointer;font-family:inherit;text-transform:uppercase;" onmouseover="this.style.color='#c0182b'" onmouseout="this.style.color='#333'">Give up (take the letter)</button>
+      <button id="challengeGiveUpBtn" style="background:none;border:none;color:var(--dim);font-size:0.62rem;font-weight:500;letter-spacing:0.14em;cursor:pointer;font-family:inherit;text-transform:uppercase;" onmouseover="this.style.color='#c0182b'" onmouseout="this.style.color='var(--dim)'">Give up (take the letter)</button>
     </div>
   </div>
 
@@ -788,7 +789,7 @@
       <button id="reverseBtn" style="background:none;border:1px solid rgba(201,168,76,0.45);color:#c9a84c;font-size:0.6rem;font-weight:600;letter-spacing:0.16em;text-transform:uppercase;cursor:pointer;font-family:inherit;padding:7px 18px;transition:all 0.2s;" onmouseover="this.style.borderColor='#c9a84c';this.style.background='rgba(201,168,76,0.08)'" onmouseout="this.style.borderColor='rgba(201,168,76,0.45)';this.style.background='none'">🔄 Reverse <span style="font-size:0.5rem;font-weight:400;opacity:0.65;letter-spacing:0.06em;text-transform:none;">(once per game)</span></button>
     </div>
     <div style="text-align:center;margin-top:10px;">
-      <button id="giveUpBtn" style="background:none;border:none;color:#333;font-size:0.62rem;font-weight:500;letter-spacing:0.14em;cursor:pointer;font-family:inherit;text-transform:uppercase;padding:4px 8px;transition:color 0.2s;" onmouseover="this.style.color='#c0182b'" onmouseout="this.style.color='#333'">Give up turn (take a letter)</button>
+      <button id="giveUpBtn" style="background:none;border:none;color:var(--dim);font-size:0.62rem;font-weight:500;letter-spacing:0.14em;cursor:pointer;font-family:inherit;text-transform:uppercase;padding:4px 8px;transition:color 0.2s;" onmouseover="this.style.color='#c0182b'" onmouseout="this.style.color='var(--dim)'">Give up turn (take a letter)</button>
     </div>
   </div>
 

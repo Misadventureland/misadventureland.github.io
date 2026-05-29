@@ -1128,7 +1128,7 @@ function renderChain() {
   const entries = Object.values(roomSnap.log ?? {});
   const el = document.getElementById('chainBox');
   if (!entries.length) {
-    el.innerHTML = '<div style="color:#333;font-size:.85rem;">The chain will appear here…</div>';
+    el.innerHTML = '<div style="color:var(--dim);font-size:.85rem;">The chain will appear here…</div>';
     return;
   }
   el.innerHTML = entries.slice(-5).map((item, i, arr) => {
@@ -1609,7 +1609,7 @@ function renderGameOver() {
     const canAdd = currentUser && pid !== me.id
                    && !myFriendNames.has((p.name ?? '').toLowerCase());
     return `<div class="score-row" style="align-items:center;">
-      <span style="color:${w ? '#ede9e3' : '#4a4a4a'};font-weight:${w ? '600' : '400'};flex:1;">${p.name ?? '?'}${w ? ' ◆' : ''}</span>
+      <span style="color:${w ? '#ede9e3' : 'var(--dim)'};font-weight:${w ? '600' : '400'};flex:1;">${p.name ?? '?'}${w ? ' ◆' : ''}</span>
       <span style="color:#c0182b;letter-spacing:.1em;font-weight:700;margin-right:${canAdd ? '10px' : '0'}">${p.letters || '—'}</span>
       ${canAdd ? `<button data-add-friend="${escHtml(p.name ?? '')}"
         style="background:none;border:1px solid var(--bd2);color:var(--dim);font-size:0.54rem;font-weight:600;letter-spacing:0.12em;text-transform:uppercase;cursor:pointer;font-family:inherit;padding:4px 8px;white-space:nowrap;"
@@ -2542,7 +2542,7 @@ function startQuoteRotation() {
 
   function showQuote() {
     const [quote, film] = shuffled[idx];
-    el.innerHTML = `${quote} <span style="font-style:normal;font-size:0.65rem;letter-spacing:0.1em;color:#333;">— ${film}</span>`;
+    el.innerHTML = `${quote} <span style="font-style:normal;font-size:0.65rem;letter-spacing:0.1em;color:var(--dim);">— ${film}</span>`;
     idx = (idx + 1) % shuffled.length;
   }
 
