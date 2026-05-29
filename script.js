@@ -1083,6 +1083,13 @@ function renderGame() {
     const reverseWrap = document.getElementById('reverseWrap');
     if (reverseWrap) reverseWrap.style.display = reverseAvailable ? 'block' : 'none';
 
+    // Deny-ace vs normal give-up: swap based on whether this is an opening response
+    const isOpeningResp = !!(roomSnap.openingMoveActive && roomSnap.openingMoveActive !== me.id);
+    const denyWrap  = document.getElementById('denyAceWrap');
+    const giveWrap  = document.getElementById('giveUpWrap');
+    if (denyWrap) denyWrap.style.display = isOpeningResp ? 'block' : 'none';
+    if (giveWrap) giveWrap.style.display = isOpeningResp ? 'none'  : 'block';
+
     // Don't steal focus if the player is currently typing in chat
     if (document.activeElement?.id !== 'chatInput') {
       document.getElementById('answerInput').focus();
@@ -1091,9 +1098,11 @@ function renderGame() {
     document.getElementById('activeInput').style.display  = 'none';
     document.getElementById('waitingPanel').style.display = 'block';
     document.getElementById('waitingFor').textContent     = curPlayer.name ?? '?';
-    // Always hide reverse button when it's not our turn
+    // Always hide reverse and deny-ace when it's not our turn
     const reverseWrap = document.getElementById('reverseWrap');
     if (reverseWrap) reverseWrap.style.display = 'none';
+    const denyWrap = document.getElementById('denyAceWrap');
+    if (denyWrap) denyWrap.style.display = 'none';
   }
 
   // ── Notification triggers ──────────────────────────────────
@@ -3067,23 +3076,20 @@ document.getElementById('challengeGiveUpBtn').addEventListener('click', async ()
 });
 
 // Give up turn / leave
+// Deny ace — immediate force re-pick with no letter earned (opening response only)
+document.getElementById('denyAceBtn').addEventListener('click', async () => {
+  const openerPid = roomSnap?.openingMoveActive;
+  if (!openerPid || openerPid === me.id) return;
+  await retryOpeningMove(openerPid);
+});
+
+// Normal give-up — earn a letter (regular turns only, not opening responses)
 document.getElementById('giveUpBtn').addEventListener('click', async () => {
   if (!roomSnap) return;
   const order = toArray(roomSnap.playerOrder);
   if (order[roomSnap.currentIdx] !== me.id) return;
-
-  const openerPid = roomSnap.openingMoveActive;
-  const isOpeningResponse = openerPid && openerPid !== me.id;
-
-  if (isOpeningResponse) {
-    const openerName = (roomSnap.players ?? {})[openerPid]?.name ?? 'The opener';
-    const typeWord   = roomSnap.roundStartType === 'actor' ? 'actor' : 'movie';
-    if (!confirm(`Can't answer? ${openerName} will need to pick a different ${typeWord}.`)) return;
-    await retryOpeningMove(openerPid);
-  } else {
-    if (!confirm('Give up your turn? You\'ll receive a letter.')) return;
-    await assignLetterAndPass(me.id);
-  }
+  if (!confirm('Give up your turn? You\'ll receive a letter.')) return;
+  await assignLetterAndPass(me.id);
 });
 
 document.getElementById('leaveBtn').addEventListener('click', () => {

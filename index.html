@@ -813,7 +813,13 @@
     <div id="reverseWrap" style="display:none;text-align:center;margin-top:10px;">
       <button id="reverseBtn" style="background:none;border:1px solid rgba(201,168,76,0.45);color:#c9a84c;font-size:0.6rem;font-weight:600;letter-spacing:0.16em;text-transform:uppercase;cursor:pointer;font-family:inherit;padding:7px 18px;transition:all 0.2s;" onmouseover="this.style.borderColor='#c9a84c';this.style.background='rgba(201,168,76,0.08)'" onmouseout="this.style.borderColor='rgba(201,168,76,0.45)';this.style.background='none'">🔄 Reverse <span style="font-size:0.5rem;font-weight:400;opacity:0.65;letter-spacing:0.06em;text-transform:none;">(once per game)</span></button>
     </div>
-    <div style="text-align:center;margin-top:10px;">
+    <!-- Deny ace — shown instead of give-up when responding to an opening move -->
+    <div id="denyAceWrap" style="display:none;text-align:center;margin-top:10px;">
+      <button id="denyAceBtn" style="background:none;border:none;color:var(--dim);font-size:0.62rem;font-weight:500;letter-spacing:0.14em;cursor:pointer;font-family:inherit;text-transform:uppercase;padding:4px 8px;transition:color 0.2s;" onmouseover="this.style.color='#c0182b'" onmouseout="this.style.color='var(--dim)'">Can't answer — force re-pick</button>
+      <p style="font-size:0.5rem;color:var(--dim);letter-spacing:0.1em;margin-top:4px;margin-bottom:0;">No letter earned · Opener must choose a different start</p>
+    </div>
+    <!-- Normal give-up — shown on regular turns -->
+    <div id="giveUpWrap" style="text-align:center;margin-top:10px;">
       <button id="giveUpBtn" style="background:none;border:none;color:var(--dim);font-size:0.62rem;font-weight:500;letter-spacing:0.14em;cursor:pointer;font-family:inherit;text-transform:uppercase;padding:4px 8px;transition:color 0.2s;" onmouseover="this.style.color='#c0182b'" onmouseout="this.style.color='var(--dim)'">Give up turn (take a letter)</button>
     </div>
   </div>
