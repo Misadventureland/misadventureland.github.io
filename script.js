@@ -73,22 +73,23 @@ const _WORD_FALLBACKS = [
 
 async function fetchRandomWord() {
   try {
-    const candidates = new Set();
-    for (let page = 1; page <= 4 && candidates.size < 25; page++) {
+    const candidates = [];
+    for (let page = 1; page <= 4 && candidates.length < 25; page++) {
       const data = await tmdbFetch('/discover/movie', {
         sort_by: 'popularity.desc',
         'vote_count.gte': 800,
         page
       });
       for (const m of data.results ?? []) {
-        if (/^[A-Za-z]{5}$/.test(m.title)) candidates.add(m.title.toUpperCase());
+        if (/^[A-Za-z]{5}$/.test(m.title) && !candidates.some(c => c.word === m.title.toUpperCase())) {
+          candidates.push({ word: m.title.toUpperCase(), wordMovieId: m.id });
+        }
       }
     }
-    const pool = [...candidates];
-    if (pool.length > 0) return pool[Math.floor(Math.random() * pool.length)];
+    if (candidates.length > 0) return candidates[Math.floor(Math.random() * candidates.length)];
   } catch (_) {}
-  // Fallback: pick from the hardcoded list
-  return _WORD_FALLBACKS[Math.floor(Math.random() * _WORD_FALLBACKS.length)];
+  // Fallback: pick from the hardcoded list (no stored movie ID)
+  return { word: _WORD_FALLBACKS[Math.floor(Math.random() * _WORD_FALLBACKS.length)], wordMovieId: null };
 }
 
 // ── Winner quotes ─────────────────────────────────────────────
@@ -809,7 +810,7 @@ async function createRoom(name) {
   roomRef = db.ref(`rooms/${roomId}`);
 
   // Fetch a random 5-letter movie title to use as the scoring word for this game
-  const word = await fetchRandomWord();
+  const { word, wordMovieId } = await fetchRandomWord();
 
   await roomRef.set({
     hostId: me.id, status: 'waiting',
@@ -821,7 +822,7 @@ async function createRoom(name) {
     winner: null, log: {}, fullLog: {},
     pendingChallenge: null, challenge: null,
     reverseUsed: {}, reverseMoveActive: null,
-    word
+    word, wordMovieId: wordMovieId ?? null
   });
 
   roomRef.onDisconnect().update({ [`players/${me.id}/connected`]: false });
@@ -874,7 +875,11 @@ function onRoomChange() {
   const cur = document.querySelector('.screen.active')?.id;
   if (s === 'waiting'  && cur !== 'screen-lobby')    showScreen('screen-lobby');
   if (s === 'playing'  && cur !== 'screen-game')     showScreen('screen-game');
-  if (s === 'finished' && cur !== 'screen-gameover') { renderGameOver(); showScreen('screen-gameover'); }
+  if (s === 'finished' && cur !== 'screen-gameover') {
+    renderGameOver();
+    showScreen('screen-gameover');
+    showWordQuoteSplash(); // cinematic reveal before the scores
+  }
   if (s === 'waiting') renderLobby();
   if (s === 'playing') renderGame();
 }
@@ -1586,6 +1591,64 @@ function nextActiveIndex(fromIdx, players) {
 // ============================================================
 //  Game over
 // ============================================================
+// ============================================================
+//  Word-movie quote splash (shown before game-over screen)
+// ============================================================
+let _splashDismissTimer = null;
+
+async function showWordQuoteSplash() {
+  const splash = document.getElementById('wordQuoteSplash');
+  if (!splash) return;
+
+  const word    = activeWord();
+  const movieId = roomSnap?.wordMovieId ?? null;
+
+  // Show immediately with just the word while we fetch details
+  document.getElementById('wqsWord').textContent    = word;
+  document.getElementById('wqsYear').textContent    = '';
+  document.getElementById('wqsTagline').textContent = '';
+  const bgEl = document.getElementById('wqsBg');
+  if (bgEl) bgEl.style.backgroundImage = '';
+
+  splash.style.display = 'flex';
+  // Fade in on next frame
+  requestAnimationFrame(() => requestAnimationFrame(() => { splash.style.opacity = '1'; }));
+
+  // Fetch tagline + poster from TMDB
+  try {
+    let data = null;
+    if (movieId) {
+      data = await tmdbFetch(`/movie/${movieId}`);
+    } else {
+      // Fallback: search by word title and take the closest match
+      const res = await tmdbFetch('/search/movie', { query: word, language: 'en-US' });
+      data = (res.results ?? []).find(m => m.title.toUpperCase() === word) ?? res.results?.[0] ?? null;
+      if (data?.id) data = await tmdbFetch(`/movie/${data.id}`);
+    }
+
+    if (data) {
+      const year    = (data.release_date ?? '').slice(0, 4);
+      const tagline = (data.tagline ?? '').trim();
+      const poster  = data.poster_path ?? '';
+
+      if (year)    document.getElementById('wqsYear').textContent    = year;
+      if (tagline) document.getElementById('wqsTagline').textContent = `"${tagline}"`;
+      if (poster && bgEl) bgEl.style.backgroundImage = `url(https://image.tmdb.org/t/p/w780${poster})`;
+    }
+  } catch (_) { /* show with just the word — still a nice reveal */ }
+
+  // Dismiss handler — tap or auto after 5.5 s
+  const dismiss = () => {
+    clearTimeout(_splashDismissTimer);
+    splash.removeEventListener('click', dismiss);
+    splash.style.opacity = '0';
+    setTimeout(() => { splash.style.display = 'none'; }, 420);
+  };
+  splash.addEventListener('click', dismiss);
+  clearTimeout(_splashDismissTimer);
+  _splashDismissTimer = setTimeout(dismiss, 5500);
+}
+
 function renderGameOver() {
   if (!roomSnap) return;
   const players  = roomSnap.players ?? {};

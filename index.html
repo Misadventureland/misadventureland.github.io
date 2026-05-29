@@ -1086,6 +1086,22 @@
 </div>
 
 <!-- Firebase Realtime Database SDK (compat) -->
+<!-- ══ WORD QUOTE SPLASH ══════════════════════════════════════ -->
+<!-- Full-screen cinematic reveal shown at game end before scores -->
+<div id="wordQuoteSplash" style="display:none;position:fixed;inset:0;z-index:3100;background:#080808;flex-direction:column;align-items:center;justify-content:center;padding:48px 32px;text-align:center;cursor:pointer;opacity:0;transition:opacity 0.42s ease;overflow:hidden;">
+  <!-- Blurred movie poster background -->
+  <div id="wqsBg" style="position:absolute;inset:-10%;background-size:cover;background-position:center;opacity:0.1;filter:blur(28px);"></div>
+  <!-- Content -->
+  <div style="position:relative;z-index:1;max-width:360px;width:100%;">
+    <div style="width:28px;height:2px;background:var(--red);margin:0 auto 22px;"></div>
+    <p style="font-size:0.5rem;font-weight:600;letter-spacing:0.3em;text-transform:uppercase;color:var(--dim);margin:0 0 14px;">You were spelling</p>
+    <p id="wqsWord" style="font-size:2.6rem;font-weight:700;letter-spacing:0.5em;color:var(--text);margin:0;padding-right:0.5em;line-height:1;"></p>
+    <p id="wqsYear" style="font-size:0.58rem;color:var(--dim);letter-spacing:0.2em;text-transform:uppercase;margin:10px 0 0;min-height:1em;"></p>
+    <p id="wqsTagline" style="font-size:1rem;font-style:italic;font-weight:400;color:var(--text);line-height:1.65;margin:28px auto 0;max-width:300px;min-height:2em;"></p>
+    <p style="font-size:0.46rem;color:var(--dim);letter-spacing:0.24em;text-transform:uppercase;margin-top:48px;">Tap to continue</p>
+  </div>
+</div>
+
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
