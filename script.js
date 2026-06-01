@@ -1881,12 +1881,12 @@ function renderGameOver() {
   }
 
   // Most obscure answer highlight — scan fullLog + current log
-  const allLogEntries = [
+  const nicheEntries = [
     ...Object.values(roomSnap.fullLog ?? {}),
     ...Object.values(roomSnap.log  ?? {})
   ].filter(e => e && e.type !== 'round-end' && e.type !== 'challenge-result' && e.nicheScore != null);
-  if (allLogEntries.length) {
-    const top = allLogEntries.reduce((best, e) => e.nicheScore > best.nicheScore ? e : best);
+  if (nicheEntries.length) {
+    const top = nicheEntries.reduce((best, e) => e.nicheScore > best.nicheScore ? e : best);
     const topBadge = nicheLabel(top.nicheScore);
     if (topBadge) {
       const nicheEl = document.getElementById('gameoverNicheHighlight');
