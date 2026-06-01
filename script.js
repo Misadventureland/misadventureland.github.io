@@ -793,7 +793,7 @@ async function validateReverseAnswer(input, lastItem, usedMovies, usedActors, pr
 // challenge.answerType = what they originally named ('movie' or 'actor')
 // challenge.answerId   = tmdbId of what they named (the thing to find another connection TO)
 // challenge.prevId     = tmdbId of the prior chain item (must not repeat this)
-async function validateChallengeAnswer(input, challenge, preSelected = null) {
+async function validateChallengeAnswer(input, challenge, preSelected = null, usedActors = {}, usedMovies = {}) {
   const { answerType, answerId, answerName, prevId, prevName, isReverse } = challenge;
 
   // ── Reverse-move challenge ────────────────────────────────────
@@ -808,6 +808,8 @@ async function validateChallengeAnswer(input, challenge, preSelected = null) {
         if (!m) return { valid: false, error: `Can't find a movie called "${input}"` };
         movieId = m.id; movieTitle = m.title;
       }
+      // The proving movie must not already be in the chain (would be trivially obvious)
+      if (usedMovies[movieId]) return { valid: false, error: `"${movieTitle}" is already in the chain — name a different connecting movie` };
       const [filmsA, filmsB] = await Promise.all([
         personFilmography(prevId),    // the previous actor
         personFilmography(answerId)   // the answer actor
@@ -830,6 +832,9 @@ async function validateChallengeAnswer(input, challenge, preSelected = null) {
         if (!p) return { valid: false, error: `Can't find an actor named "${input}"` };
         personId = p.id; personName = p.name;
       }
+      // The proving actor must not already be in the chain — this prevents trivially
+      // naming the same actor that was shown as sharedVia when the reverse was played
+      if (usedActors[personId]) return { valid: false, error: `${personName} is already in the chain — name a different connecting actor` };
       const [castA, castB] = await Promise.all([
         movieCast(prevId),    // the previous movie
         movieCast(answerId)   // the answer movie
@@ -1564,7 +1569,7 @@ async function handleChallengeSubmit() {
   clearSuggestionsEl('challengeSuggestions');
 
   try {
-    const result = await validateChallengeAnswer(answer, challenge, picked);
+    const result = await validateChallengeAnswer(answer, challenge, picked, roomSnap.usedActors ?? {}, roomSnap.usedMovies ?? {});
     if (result.valid) {
       // Challenged player proved it → challenger gets the letter
       setFeedback('challengeFeedback', `✓ ${result.name} — ${roomSnap.players?.[challenge.challengerId]?.name ?? 'Challenger'} gets the letter!`, 'ok');
