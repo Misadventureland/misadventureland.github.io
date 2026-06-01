@@ -1803,13 +1803,14 @@ function renderGameOver() {
   const order    = toArray(roomSnap.playerOrder);
   const winnerId = roomSnap.winner;
 
-  // Write stats once per game for signed-in users
+  // Write stats + history once per game for signed-in users
   if (currentUser && !gameStatsWritten) {
     gameStatsWritten = true;
     const myData     = players[me.id] ?? {};
     const didWin     = winnerId === me.id;
     const lettersGot = (myData.letters ?? '').length;
     writeGameStats(didWin, lettersGot);
+    writeGameHistory(didWin, players, winnerId);
   }
 
   document.getElementById('winnerName').textContent = players[winnerId]?.name ?? 'Nobody';
@@ -1828,21 +1829,44 @@ function renderGameOver() {
     </div>`;
   }).join('');
 
-  const entries = Object.values(roomSnap.log ?? {});
-  document.getElementById('chainLen').textContent = entries.length;
+  // Merge fullLog (archived rounds) + current round, sorted chronologically
+  const fullLog    = roomSnap.fullLog ?? {};
+  const currentLog = roomSnap.log     ?? {};
+  const sortedFull    = Object.entries(fullLog).sort(([a], [b]) => a < b ? -1 : 1);
+  const sortedCurrent = Object.entries(currentLog).sort(([a], [b]) => a < b ? -1 : 1);
+  const allLogEntries = [...sortedFull, ...sortedCurrent];
+
+  let linkCount = 0;
+  let roundNum  = 1;
+  let finalChainHtml = '';
+
+  for (const [, entry] of allLogEntries) {
+    if (!entry || typeof entry !== 'object') continue;
+    if (entry.type === 'round-end') {
+      finalChainHtml += `<div style="margin:6px 0;padding:6px 10px;background:rgba(192,24,43,0.1);border-left:2px solid var(--red);border-radius:3px;font-size:0.68rem;color:var(--dim);">
+        ✗ ${escHtml(entry.loserName ?? '?')} earned <strong style="color:#c0182b;">${escHtml(entry.letter ?? '?')}</strong> — Round ${roundNum} ends
+      </div>`;
+      roundNum++;
+    } else if (entry.type === 'challenge-result') {
+      // skip in this view
+    } else {
+      linkCount++;
+      const actor   = entry.type === 'actor';
+      const img     = entry.imagePath ? tmdbImg(entry.imagePath) : null;
+      const fullImg = (actor && entry.imagePath) ? tmdbImg(entry.imagePath, 'w500') : '';
+      finalChainHtml += `<div class="chain-log-item">
+        ${img
+          ? `<img class="chain-log-thumb ${actor ? 'round' : ''}" src="${img}" alt="" loading="lazy"
+               ${actor ? `data-fullimg="${fullImg}" data-name="${escHtml(entry.name ?? '')}"` : ''}>`
+          : `<span class="icon">${actor ? '⭐' : '🎬'}</span>`}
+        <span>${escHtml(entry.name ?? '?')}</span>
+      </div>`;
+    }
+  }
+
+  document.getElementById('chainLen').textContent = linkCount;
   const finalChainEl = document.getElementById('finalChain');
-  finalChainEl.innerHTML = entries.map(item => {
-    const actor   = item.type === 'actor';
-    const img     = item.imagePath ? tmdbImg(item.imagePath) : null;
-    const fullImg = (actor && item.imagePath) ? tmdbImg(item.imagePath, 'w500') : '';
-    return `<div class="chain-log-item">
-      ${img
-        ? `<img class="chain-log-thumb ${actor ? 'round' : ''}" src="${img}" alt="" loading="lazy"
-             ${actor ? `data-fullimg="${fullImg}" data-name="${item.name}"` : ''}>`
-        : `<span class="icon">${actor ? '⭐' : '🎬'}</span>`}
-      <span>${item.name}</span>
-    </div>`;
-  }).join('');
+  finalChainEl.innerHTML = finalChainHtml || '<p style="color:var(--dim);font-size:0.82rem;">No chain entries.</p>';
 
   finalChainEl.querySelectorAll('.chain-log-thumb.round[data-fullimg]').forEach(img => {
     img.addEventListener('click', () => openLightbox(img.dataset.fullimg, img.dataset.name));
@@ -1919,6 +1943,44 @@ async function writeGameStats(didWin, lettersGot) {
     });
   } catch (e) {
     console.error('Stats write failed:', e);
+  }
+}
+
+// ============================================================
+//  Game history — compact record stored at users/{uid}/gameHistory
+// ============================================================
+async function writeGameHistory(didWin, players, winnerId) {
+  if (!currentUser || !db || !roomSnap) return;
+  try {
+    const fullLog    = roomSnap.fullLog ?? {};
+    const currentLog = roomSnap.log     ?? {};
+    const allEntries = [
+      ...Object.entries(fullLog).sort(([a], [b]) => a < b ? -1 : 1),
+      ...Object.entries(currentLog).sort(([a], [b]) => a < b ? -1 : 1),
+    ];
+
+    // Compact chain: just name + type for each real link
+    const chain = allEntries
+      .filter(([, e]) => e && e.type !== 'round-end' && e.type !== 'challenge-result')
+      .map(([, e]) => ({ name: e.name ?? '?', type: e.type ?? 'movie' }));
+
+    const opponents = Object.entries(players)
+      .filter(([pid]) => pid !== currentUser.uid)
+      .map(([, p]) => p.name ?? '?');
+
+    const record = {
+      ts:        Date.now(),
+      word:      activeWord() ?? '',
+      won:       didWin,
+      winner:    players[winnerId]?.name ?? '?',
+      opponents,
+      chainLen:  chain.length,
+      chain,
+    };
+
+    await db.ref(`users/${currentUser.uid}/gameHistory`).push(record);
+  } catch (e) {
+    console.error('Game history write failed:', e);
   }
 }
 
@@ -2095,8 +2157,8 @@ async function renderAccountPage() {
     setEl('acctWinRate',     g > 0 ? `${Math.round(w / g * 100)}%` : '—');
   } catch (_) {}
 
-  // Friends
-  await Promise.all([renderFriendsList(), renderFriendRequests()]);
+  // Past games + friends
+  await Promise.all([renderPastGames(), renderFriendsList(), renderFriendRequests()]);
 
   // Notification prefs
   await loadNotifPrefs();
@@ -2106,6 +2168,46 @@ async function renderAccountPage() {
 // ============================================================
 //  Friends
 // ============================================================
+
+async function renderPastGames() {
+  if (!currentUser || !db) return;
+  const el = document.getElementById('acctPastGamesList');
+  if (!el) return;
+
+  const snap = await db.ref(`users/${currentUser.uid}/gameHistory`).orderByChild('ts').limitToLast(20).once('value');
+  const raw  = snap.val() ?? {};
+  const games = Object.values(raw).sort((a, b) => b.ts - a.ts);
+
+  if (!games.length) {
+    el.innerHTML = '<p style="font-size:0.78rem;color:var(--dim);padding:4px 0;">No games yet — finish a game for it to appear here</p>';
+    return;
+  }
+
+  el.innerHTML = games.map((g, i) => {
+    const date = new Date(g.ts).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+    const resultColor = g.won ? 'var(--ok)' : '#c0182b';
+    const resultText  = g.won ? 'Won' : 'Lost';
+    const opps = g.opponents?.length ? g.opponents.join(', ') : '—';
+    const chainHtml = (g.chain ?? []).map(c =>
+      `<span style="font-size:0.72rem;color:${c.type === 'actor' ? '#c9a84c' : 'var(--dim)'};">${escHtml(c.name)}</span>`
+    ).join('<span style="color:var(--dim);margin:0 3px;">→</span>');
+
+    const id = `past-game-chain-${i}`;
+    return `<div style="padding:10px 0;border-bottom:1px solid var(--bd);">
+      <div style="display:flex;align-items:center;gap:8px;cursor:pointer;" onclick="document.getElementById('${id}').style.display=document.getElementById('${id}').style.display==='none'?'block':'none'">
+        <span style="font-size:0.64rem;font-weight:700;letter-spacing:0.1em;color:${resultColor};min-width:28px;">${resultText}</span>
+        <span style="flex:1;font-size:0.78rem;color:var(--text);font-weight:500;letter-spacing:0.2em;">${escHtml(g.word)}</span>
+        <span style="font-size:0.62rem;color:var(--dim);">${g.chainLen} links</span>
+        <span style="font-size:0.62rem;color:var(--dim);">${date}</span>
+        <span style="font-size:0.62rem;color:var(--dim);">▾</span>
+      </div>
+      <div style="font-size:0.64rem;color:var(--dim);margin-top:3px;">vs ${escHtml(opps)}</div>
+      <div id="${id}" style="display:none;margin-top:8px;padding:8px;background:var(--s2);border-radius:4px;line-height:2;word-break:break-word;">
+        ${chainHtml || '<span style="color:var(--dim);font-size:0.72rem;">Empty chain</span>'}
+      </div>
+    </div>`;
+  }).join('');
+}
 
 async function renderFriendsList() {
   if (!currentUser || !db) return;
