@@ -64,32 +64,33 @@ const TMDB_BASE = 'https://api.themoviedb.org/3';
 // Falls back to 'MOVIE' if the room was created before this feature or fetch failed.
 function activeWord() { return roomSnap?.word ?? 'MOVIE'; }
 
-// Fallback pool used when TMDB yields nothing suitable
-const _WORD_FALLBACKS = [
-  'ALIEN','TENET','JOKER','ROCKY','SHREK','FARGO','CRASH',
-  'DRIVE','BLADE','TAKEN','BAMBI','SPEED','GHOST','TWINS',
-  'SULLY','FOCUS','BELLE','CRANK','DINER','LUCKY'
+// Curated pool of standalone 5-letter all-alpha movie titles.
+// Wide variety of genres and decades — the primary word source.
+// TMDB is only used afterwards to fetch the movie ID for the splash screen.
+const _WORD_CANDIDATES = [
+  'ALIEN','ALPHA','BAMBI','BELLE','BIRTH','BLADE','BRAVE','CAROL',
+  'CARGO','CRASH','CRANK','CREED','DINER','DOUBT','DRIVE','FARGO',
+  'FOCUS','FRIDA','GHOST','GLASS','JOKER','JUICE','LOGAN','LUCKY',
+  'NORTH','NURSE','PROOF','RANGO','ROCKY','SHAFT','SHREK','SMOKE',
+  'SONIC','SPAWN','SPEED','SPLIT','SULLY','TAKEN','TENET','TOMMY',
+  'TRUTH','TWINS','VENOM','VENUS','WILDE','WITCH','YOUTH','ZELIG'
 ];
 
 async function fetchRandomWord() {
+  // Pick from the curated list — never API-dependent for the word itself
+  const word = _WORD_CANDIDATES[Math.floor(Math.random() * _WORD_CANDIDATES.length)];
+
+  // Separately look up the TMDB movie ID so the game-end splash can show
+  // the tagline and poster. If this fails the word still works fine.
   try {
-    const candidates = [];
-    for (let page = 1; page <= 4 && candidates.length < 25; page++) {
-      const data = await tmdbFetch('/discover/movie', {
-        sort_by: 'popularity.desc',
-        'vote_count.gte': 800,
-        page
-      });
-      for (const m of data.results ?? []) {
-        if (/^[A-Za-z]{5}$/.test(m.title) && !candidates.some(c => c.word === m.title.toUpperCase())) {
-          candidates.push({ word: m.title.toUpperCase(), wordMovieId: m.id });
-        }
-      }
-    }
-    if (candidates.length > 0) return candidates[Math.floor(Math.random() * candidates.length)];
+    const data  = await tmdbFetch('/search/movie', { query: word, language: 'en-US' });
+    const match = (data.results ?? []).find(m => m.title.toUpperCase() === word)
+                ?? data.results?.[0]
+                ?? null;
+    if (match?.id) return { word, wordMovieId: match.id };
   } catch (_) {}
-  // Fallback: pick from the hardcoded list (no stored movie ID)
-  return { word: _WORD_FALLBACKS[Math.floor(Math.random() * _WORD_FALLBACKS.length)], wordMovieId: null };
+
+  return { word, wordMovieId: null };
 }
 
 // ── Winner quotes ─────────────────────────────────────────────
