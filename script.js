@@ -505,7 +505,8 @@ async function tmdbFetch(path, params = {}) {
 
 async function searchMovie(title) {
   const data = await tmdbFetch('/search/movie', { query: title, language: 'en-US' });
-  return data.results?.[0] ?? null;
+  // video:true on TMDB flags direct-to-video and TV movies — skip them
+  return (data.results ?? []).find(m => !m.video) ?? null;
 }
 
 async function searchPerson(name) {
@@ -520,7 +521,8 @@ async function movieCast(movieId) {
 
 async function personFilmography(personId) {
   const data = await tmdbFetch(`/person/${personId}/movie_credits`);
-  return data.cast ?? [];
+  // Exclude direct-to-video and TV movies
+  return (data.cast ?? []).filter(m => !m.video);
 }
 
 // ============================================================
@@ -575,14 +577,16 @@ async function fetchSuggestionsFor(query, direction, suggestionsId, onSelect) {
       }));
     } else {
       const data = await tmdbFetch('/search/movie', { query, language: 'en-US' });
-      results = (data.results ?? []).slice(0, 6).map(m => ({
-        tmdbId: m.id, name: m.title, type: 'movie',
-        imagePath: m.poster_path ?? null,
-        sub: m.release_date ? m.release_date.slice(0, 4) : '',
-        popularity:  m.popularity  ?? 0,   // preserved for niche scoring
-        voteCount:   m.vote_count  ?? 0,
-        releaseYear: m.release_date?.slice(0, 4) ?? null
-      }));
+      results = (data.results ?? [])
+        .filter(m => !m.video)   // exclude direct-to-video and TV movies
+        .slice(0, 6).map(m => ({
+          tmdbId: m.id, name: m.title, type: 'movie',
+          imagePath: m.poster_path ?? null,
+          sub: m.release_date ? m.release_date.slice(0, 4) : '',
+          popularity:  m.popularity  ?? 0,   // preserved for niche scoring
+          voteCount:   m.vote_count  ?? 0,
+          releaseYear: m.release_date?.slice(0, 4) ?? null
+        }));
     }
     renderSuggestionsIn(results, suggestionsId, onSelect);
   } catch (_) { /* silently ignore */ }
