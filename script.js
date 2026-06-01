@@ -547,8 +547,8 @@ function computeNicheScore(type, { popularity = 0, voteCount = 0, releaseYear = 
     const mainstream = Math.min(1, voteNorm * 0.65 + popNorm * 0.35 + recency);
     return Math.max(1, Math.min(99, Math.round((1 - mainstream) * 100)));
   }
-  // Actor: popularity ceiling ~150 for top stars
-  const popNorm = Math.log10(Math.max(popularity, 1)) / Math.log10(150);
+  // Actor: popularity ceiling ~500 for top stars
+  const popNorm = Math.log10(Math.max(popularity, 1)) / Math.log10(500);
   return Math.max(1, Math.min(99, Math.round((1 - Math.min(1, popNorm)) * 100)));
 }
 
