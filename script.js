@@ -793,62 +793,15 @@ async function validateReverseAnswer(input, lastItem, usedMovies, usedActors, pr
 // challenge.answerType = what they originally named ('movie' or 'actor')
 // challenge.answerId   = tmdbId of what they named (the thing to find another connection TO)
 // challenge.prevId     = tmdbId of the prior chain item (must not repeat this)
-async function validateChallengeAnswer(input, challenge, preSelected = null, usedActors = {}, usedMovies = {}) {
-  const { answerType, answerId, answerName, prevId, prevName, isReverse } = challenge;
+async function validateChallengeAnswer(input, challenge, preSelected = null) {
+  const { answerType, answerId, answerName, prevId } = challenge;
 
-  // ── Reverse-move challenge ────────────────────────────────────
-  if (isReverse) {
-    if (answerType === 'actor') {
-      // Reverse was actor→actor. To prove: name a MOVIE both actors were in.
-      let movieId, movieTitle;
-      if (preSelected) {
-        movieId = preSelected.tmdbId; movieTitle = preSelected.name;
-      } else {
-        const m = await searchMovie(input);
-        if (!m) return { valid: false, error: `Can't find a movie called "${input}"` };
-        movieId = m.id; movieTitle = m.title;
-      }
-      // The proving movie must not already be in the chain (would be trivially obvious)
-      if (usedMovies[movieId]) return { valid: false, error: `"${movieTitle}" is already in the chain — name a different connecting movie` };
-      const [filmsA, filmsB] = await Promise.all([
-        personFilmography(prevId),    // the previous actor
-        personFilmography(answerId)   // the answer actor
-      ]);
-      const inA = filmsA.some(f => f.id === movieId);
-      const inB = filmsB.some(f => f.id === movieId);
-      if (!inA || !inB) {
-        const missing = !inA ? prevName : answerName;
-        return { valid: false, error: `${missing} wasn't in "${movieTitle}"` };
-      }
-      return { valid: true, name: movieTitle };
-
-    } else {
-      // Reverse was movie→movie. To prove: name an ACTOR who was in both movies.
-      let personId, personName;
-      if (preSelected) {
-        personId = preSelected.tmdbId; personName = preSelected.name;
-      } else {
-        const p = await searchPerson(input);
-        if (!p) return { valid: false, error: `Can't find an actor named "${input}"` };
-        personId = p.id; personName = p.name;
-      }
-      // The proving actor must not already be in the chain — this prevents trivially
-      // naming the same actor that was shown as sharedVia when the reverse was played
-      if (usedActors[personId]) return { valid: false, error: `${personName} is already in the chain — name a different connecting actor` };
-      const [castA, castB] = await Promise.all([
-        movieCast(prevId),    // the previous movie
-        movieCast(answerId)   // the answer movie
-      ]);
-      const inA = castA.some(c => c.id === personId);
-      const inB = castB.some(c => c.id === personId);
-      if (!inA || !inB) {
-        const missing = !inA ? `"${prevName}"` : `"${answerName}"`;
-        return { valid: false, error: `${personName} wasn't in ${missing}` };
-      }
-      return { valid: true, name: personName };
-    }
-  }
-
+  // ── All challenges (including reverse) use the same validation ──
+  // For a reverse the answerType / answerId refer to the reverse answer item.
+  // prevId on a reverse is an item of the OPPOSITE type (e.g. a movie ID when
+  // answerType='actor'), so the "same as the previous item" guard below never
+  // fires — no special-casing needed.
+  //
   // ── Normal challenge ──────────────────────────────────────────
   if (answerType === 'movie') {
     // Original answer was a movie → must name another ACTOR from it
@@ -1220,20 +1173,17 @@ function renderChallengeUI(challenge, pending, players, myData) {
       // I'm being challenged — show the response input
       response.style.display = 'block';
       const challengerName = players[challenge.challengerId]?.name ?? 'Someone';
-      let promptText;
-      if (challenge.isReverse) {
-        // Reverse challenge: prove the co-star / shared-cast link
-        if (challenge.answerType === 'actor') {
-          promptText = `<strong>${challengerName}</strong> is challenging your Reverse! Name a <strong>movie</strong> that both <strong>${challenge.prevName}</strong> and <strong>${challenge.answerName}</strong> appeared in`;
-        } else {
-          promptText = `<strong>${challengerName}</strong> is challenging your Reverse! Name an <strong>actor</strong> who appeared in both <strong>${challenge.prevName}</strong> and <strong>${challenge.answerName}</strong>`;
-        }
-      } else {
-        const dir = challenge.answerType === 'movie' ? 'actor' : 'movie';
-        const exclude = challenge.prevName ? ` (not ${challenge.prevName})` : '';
-        promptText = `<strong>${challengerName}</strong> is challenging you! ` +
-          `Name another <strong>${dir}</strong> ${challenge.answerType === 'movie' ? `from <strong>${challenge.answerName}</strong>` : `starring <strong>${challenge.answerName}</strong>`}${exclude}`;
-      }
+      const dir     = challenge.answerType === 'movie' ? 'actor' : 'movie';
+      const prefix  = challenge.isReverse ? 'is challenging your Reverse!' : 'is challenging you!';
+      // For a reverse, prevName is the wrong type (e.g. a movie when naming an actor)
+      // so we suppress the "not X" exclude to keep the prompt clean.
+      const exclude = (!challenge.isReverse && challenge.prevName) ? ` (not ${challenge.prevName})` : '';
+      const promptText =
+        `<strong>${challengerName}</strong> ${prefix} ` +
+        `Name another <strong>${dir}</strong> ` +
+        `${challenge.answerType === 'movie'
+          ? `from <strong>${challenge.answerName}</strong>`
+          : `starring <strong>${challenge.answerName}</strong>`}${exclude}`;
       document.getElementById('challengePrompt').innerHTML = promptText;
       document.getElementById('challengeInput').focus();
     } else {
@@ -1569,7 +1519,7 @@ async function handleChallengeSubmit() {
   clearSuggestionsEl('challengeSuggestions');
 
   try {
-    const result = await validateChallengeAnswer(answer, challenge, picked, roomSnap.usedActors ?? {}, roomSnap.usedMovies ?? {});
+    const result = await validateChallengeAnswer(answer, challenge, picked);
     if (result.valid) {
       // Challenged player proved it → challenger gets the letter
       setFeedback('challengeFeedback', `✓ ${result.name} — ${roomSnap.players?.[challenge.challengerId]?.name ?? 'Challenger'} gets the letter!`, 'ok');
