@@ -216,6 +216,7 @@ let selectedSuggestion        = null;   // autocomplete pick for main input
 let selectedChallengeSuggestion = null; // autocomplete pick for challenge input
 let submitting                = false;
 let challengeSubmitting       = false;
+let _challengeUsedWarning     = false;  // true = used-item warning shown; next fail → forfeit
 let lastSeenChallengeTs       = 0;
 let chatAttached              = false;
 let overlayTimer              = null;
@@ -793,7 +794,7 @@ async function validateReverseAnswer(input, lastItem, usedMovies, usedActors, pr
 // challenge.answerType = what they originally named ('movie' or 'actor')
 // challenge.answerId   = tmdbId of what they named (the thing to find another connection TO)
 // challenge.prevId     = tmdbId of the prior chain item (must not repeat this)
-async function validateChallengeAnswer(input, challenge, preSelected = null) {
+async function validateChallengeAnswer(input, challenge, preSelected = null, usedActors = {}, usedMovies = {}) {
   const { answerType, answerId, answerName, prevId } = challenge;
 
   // ── All challenges (including reverse) use the same validation ──
@@ -814,6 +815,8 @@ async function validateChallengeAnswer(input, challenge, preSelected = null) {
       personId = p.id; personName = p.name;
     }
     if (prevId && personId === prevId) return { valid: false, error: `That's the actor the chain came from — name a different one` };
+    // Already-used check — returns a distinct flag so the caller can issue a warning + free retry
+    if (usedActors[personId]) return { valid: false, alreadyUsed: true, error: `${personName} is already in the chain` };
     const cast = await movieCast(answerId);
     if (!cast.some(c => c.id === personId)) return { valid: false, error: `${personName} wasn't in "${answerName}"` };
     return { valid: true, name: personName };
@@ -829,6 +832,8 @@ async function validateChallengeAnswer(input, challenge, preSelected = null) {
       movieId = m.id; movieTitle = m.title;
     }
     if (prevId && movieId === prevId) return { valid: false, error: `That's the movie the chain came from — name a different one` };
+    // Already-used check
+    if (usedMovies[movieId]) return { valid: false, alreadyUsed: true, error: `"${movieTitle}" is already in the chain` };
     const films = await personFilmography(answerId);
     if (!films.some(m => m.id === movieId)) return { valid: false, error: `${answerName} wasn't in "${movieTitle}"` };
     return { valid: true, name: movieTitle };
@@ -1486,6 +1491,7 @@ async function revokeChallenge() {
   if (!roomSnap?.challenge) return;
   const ch = roomSnap.challenge;
   if (ch.challengerId !== me.id) return; // only the challenger can revoke
+  _challengeUsedWarning = false; // clear any pending warning on the other device
   // Restore pendingChallenge so a re-challenge is still possible
   await roomRef.update({
     challenge: null,
@@ -1519,15 +1525,39 @@ async function handleChallengeSubmit() {
   clearSuggestionsEl('challengeSuggestions');
 
   try {
-    const result = await validateChallengeAnswer(answer, challenge, picked);
+    const result = await validateChallengeAnswer(
+      answer, challenge, picked,
+      roomSnap.usedActors ?? {}, roomSnap.usedMovies ?? {}
+    );
+
     if (result.valid) {
-      // Challenged player proved it → challenger gets the letter
+      // Proved it — challenger takes the letter
+      _challengeUsedWarning = false;
       setFeedback('challengeFeedback', `✓ ${result.name} — ${roomSnap.players?.[challenge.challengerId]?.name ?? 'Challenger'} gets the letter!`, 'ok');
       await resolveChallenge(challenge.challengerId, result.name);
+
+    } else if (result.alreadyUsed) {
+      if (_challengeUsedWarning) {
+        // Second offence — forfeit
+        _challengeUsedWarning = false;
+        setFeedback('challengeFeedback', `${result.error} — and you already had your warning. Taking the letter.`, 'err');
+        setTimeout(() => resolveChallenge(me.id), 1200);
+      } else {
+        // First time — warn and give a free retry
+        _challengeUsedWarning = true;
+        setFeedback('challengeFeedback', `⚠️ ${result.error} — that's a free pass, but it's your last chance. Pick someone new.`, 'warn');
+      }
+
     } else {
-      setFeedback('challengeFeedback', result.error, 'err');
-      // Give them a moment to read the error, then they must give up or try again
-      // (unlimited attempts — they can give up to take the letter)
+      if (_challengeUsedWarning) {
+        // They had a warning chance and still got it wrong — forfeit
+        _challengeUsedWarning = false;
+        setFeedback('challengeFeedback', `${result.error} — you've used your last chance. Taking the letter.`, 'err');
+        setTimeout(() => resolveChallenge(me.id), 1200);
+      } else {
+        setFeedback('challengeFeedback', result.error, 'err');
+        // Unlimited retries until they give up or answer correctly
+      }
     }
   } catch (e) {
     console.error(e);
@@ -1539,6 +1569,7 @@ async function handleChallengeSubmit() {
 }
 
 async function resolveChallenge(loserPid, winningAnswer = null) {
+  _challengeUsedWarning = false;  // always clear on resolution
   const challenge = roomSnap?.challenge;
   const players   = roomSnap?.players ?? {};
 
