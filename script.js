@@ -526,6 +526,25 @@ async function personFilmography(personId) {
   return (data.cast ?? []).filter(m => !m.video);
 }
 
+// Cache so repeated checks within the same session don't re-fetch
+const _releaseDateCache = {};
+// Returns true if the movie has at least one theatrical (type 3) or streaming (type 6) release.
+// Rejects pure TV movies (type 4 only) and direct-to-physical (type 5 only) that slip past video:true.
+async function isTheatricalOrStreaming(movieId) {
+  if (_releaseDateCache[movieId] !== undefined) return _releaseDateCache[movieId];
+  try {
+    const data = await tmdbFetch(`/movie/${movieId}/release_dates`);
+    const allTypes = (data.results ?? []).flatMap(r => (r.release_dates ?? []).map(d => d.type));
+    const ok = allTypes.includes(3) || allTypes.includes(6);
+    _releaseDateCache[movieId] = ok;
+    return ok;
+  } catch (_) {
+    // On fetch failure, allow the movie through so a network blip doesn't block play
+    _releaseDateCache[movieId] = true;
+    return true;
+  }
+}
+
 // ============================================================
 //  Niche / obscurity scoring
 // ============================================================
@@ -674,6 +693,7 @@ async function validateAnswer(input, lastItem, usedMovies, usedActors, preSelect
     }
     if (!movie) return { valid: false, error: `Can't find a movie called "${input}"` };
     if (usedMovies?.[movie.id]) return { valid: false, error: `"${movie.title}" was already used` };
+    if (!await isTheatricalOrStreaming(movie.id)) return { valid: false, error: `"${movie.title}" doesn't count — TV movies and direct-to-video releases aren't allowed` };
     const cast = await movieCast(movie.id);
     if (cast.filter(c => !usedActors?.[c.id]).length === 0) {
       return { valid: false, error: `"${movie.title}" has no available actors to follow — that's an ace. Try a different movie` };
@@ -711,6 +731,7 @@ async function validateAnswer(input, lastItem, usedMovies, usedActors, preSelect
       moviePop = m.popularity ?? 0; movieVotes = m.vote_count ?? 0; movieYear = m.release_date?.slice(0,4) ?? null;
     }
     if (usedMovies?.[movieId]) return { valid: false, error: `"${movieTitle}" was already used` };
+    if (!await isTheatricalOrStreaming(movieId)) return { valid: false, error: `"${movieTitle}" doesn't count — TV movies and direct-to-video releases aren't allowed` };
     const films = await personFilmography(lastItem.tmdbId);
     if (!films.some(m => m.id === movieId)) return { valid: false, error: `${lastItem.name} wasn't in "${movieTitle}"` };
     // Filmography entries also carry vote_count/popularity — prefer them as they're fresh
@@ -772,6 +793,7 @@ async function validateReverseAnswer(input, lastItem, usedMovies, usedActors, pr
     }
     if (movieId === lastItem.tmdbId) return { valid: false, error: "That's the same movie!" };
     if (usedMovies?.[movieId]) return { valid: false, error: `"${movieTitle}" was already used` };
+    if (!await isTheatricalOrStreaming(movieId)) return { valid: false, error: `"${movieTitle}" doesn't count — TV movies and direct-to-video releases aren't allowed` };
 
     const [castA, castB] = await Promise.all([
       movieCast(lastItem.tmdbId),
