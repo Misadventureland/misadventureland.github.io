@@ -3189,6 +3189,76 @@ document.getElementById('friendReqPopupView').addEventListener('click', () => {
 });
 
 // Chain log modal
+// In-game stats modal
+async function showInGameStats() {
+  if (!currentUser || !db) return;
+  const modal = document.getElementById('inGameStatsModal');
+  if (!modal) return;
+  modal.style.display = 'block';
+
+  const setEl = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+  try {
+    const snap = await db.ref(`users/${currentUser.uid}`).once('value');
+    const d    = snap.val() ?? {};
+    const g = d.gamesPlayed ?? 0;
+    const w = d.wins        ?? 0;
+    setEl('igsGamesPlayed', g || '0');
+    setEl('igsWins',        w || '0');
+    setEl('igsLosses',      d.losses        ?? '0');
+    setEl('igsStreak',      d.currentStreak ?? '0');
+    setEl('igsBestStreak',  d.bestStreak    ?? '0');
+    setEl('igsWinRate',     g > 0 ? `${Math.round(w / g * 100)}%` : '—');
+  } catch (_) {}
+
+  // Past games
+  const listEl = document.getElementById('igsPastGamesList');
+  if (listEl) {
+    try {
+      const snap  = await db.ref(`users/${currentUser.uid}/gameHistory`).orderByChild('ts').limitToLast(20).once('value');
+      const raw   = snap.val() ?? {};
+      const games = Object.values(raw).sort((a, b) => b.ts - a.ts);
+      if (!games.length) {
+        listEl.innerHTML = '<p style="font-size:0.78rem;color:var(--dim);padding:4px 0;">No games yet</p>';
+      } else {
+        listEl.innerHTML = games.map((g, i) => {
+          const date        = new Date(g.ts).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+          const resultColor = g.won ? 'var(--ok)' : '#c0182b';
+          const resultText  = g.won ? 'Won' : 'Lost';
+          const opps        = g.opponents?.length ? g.opponents.join(', ') : '—';
+          const chainHtml   = (g.chain ?? []).map(c =>
+            `<span style="font-size:0.72rem;color:${c.type === 'actor' ? '#c9a84c' : 'var(--dim)'};">${escHtml(c.name)}</span>`
+          ).join('<span style="color:var(--dim);margin:0 3px;">→</span>');
+          const id = `igs-chain-${i}`;
+          return `<div style="padding:10px 0;border-bottom:1px solid var(--bd);">
+            <div style="display:flex;align-items:center;gap:8px;cursor:pointer;" onclick="document.getElementById('${id}').style.display=document.getElementById('${id}').style.display==='none'?'block':'none'">
+              <span style="font-size:0.64rem;font-weight:700;letter-spacing:0.1em;color:${resultColor};min-width:28px;">${resultText}</span>
+              <span style="flex:1;font-size:0.78rem;color:var(--text);font-weight:500;letter-spacing:0.2em;">${escHtml(g.word)}</span>
+              <span style="font-size:0.62rem;color:var(--dim);">${g.chainLen} links</span>
+              <span style="font-size:0.62rem;color:var(--dim);">${date}</span>
+              <span style="font-size:0.62rem;color:var(--dim);">▾</span>
+            </div>
+            <div style="font-size:0.64rem;color:var(--dim);margin-top:3px;">vs ${escHtml(opps)}</div>
+            <div id="${id}" style="display:none;margin-top:8px;padding:8px;background:var(--s2);border-radius:4px;line-height:2;word-break:break-word;">
+              ${chainHtml || '<span style="color:var(--dim);font-size:0.72rem;">Empty chain</span>'}
+            </div>
+          </div>`;
+        }).join('');
+      }
+    } catch (_) {
+      listEl.innerHTML = '<p style="font-size:0.78rem;color:var(--dim);">Couldn\'t load history</p>';
+    }
+  }
+}
+
+document.getElementById('inGameStatsBtn').addEventListener('click', showInGameStats);
+document.getElementById('inGameStatsCloseBtn').addEventListener('click', () => {
+  const modal = document.getElementById('inGameStatsModal');
+  if (modal) modal.style.display = 'none';
+});
+document.getElementById('inGameStatsModal').addEventListener('click', function (e) {
+  if (e.target === this) this.style.display = 'none';
+});
+
 document.getElementById('viewChainLogBtn').addEventListener('click', showChainLogModal);
 document.getElementById('chainLogCloseBtn').addEventListener('click', () => {
   const modal = document.getElementById('chainLogModal');

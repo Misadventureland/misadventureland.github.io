@@ -724,7 +724,10 @@
     </div>
     <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;">
       <div class="room-tag">Room: <span id="gameCode"></span></div>
-      <button id="leaveBtn" style="background:none;border:none;color:var(--dim);font-size:0.62rem;letter-spacing:0.14em;cursor:pointer;font-family:inherit;text-transform:uppercase;padding:0;font-weight:500;" onmouseover="this.style.color='#c0182b'" onmouseout="this.style.color='var(--dim)'">Leave</button>
+      <div style="display:flex;gap:14px;align-items:center;">
+        <button id="inGameStatsBtn" style="background:none;border:none;color:var(--dim);font-size:0.62rem;letter-spacing:0.14em;cursor:pointer;font-family:inherit;text-transform:uppercase;padding:0;font-weight:500;" onmouseover="this.style.color='var(--text)'" onmouseout="this.style.color='var(--dim)'">Stats</button>
+        <button id="leaveBtn" style="background:none;border:none;color:var(--dim);font-size:0.62rem;letter-spacing:0.14em;cursor:pointer;font-family:inherit;text-transform:uppercase;padding:0;font-weight:500;" onmouseover="this.style.color='#c0182b'" onmouseout="this.style.color='var(--dim)'">Leave</button>
+      </div>
     </div>
   </div>
 
@@ -1146,6 +1149,30 @@
   </div>
   <div style="margin-top:8px;text-align:right;">
     <button id="friendReqPopupView" style="background:none;border:none;color:var(--dim);font-size:0.52rem;font-weight:500;letter-spacing:0.14em;text-transform:uppercase;cursor:pointer;font-family:inherit;padding:0;" onmouseover="this.style.color='var(--text)'" onmouseout="this.style.color='var(--dim)'">View in Account →</button>
+  </div>
+</div>
+
+<!-- In-game stats modal -->
+<div id="inGameStatsModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.92);z-index:1001;overflow-y:auto;-webkit-overflow-scrolling:touch;">
+  <div style="max-width:520px;margin:0 auto;padding:28px 20px 80px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px;padding-bottom:16px;border-bottom:1px solid var(--bd);">
+      <span style="font-size:0.6rem;font-weight:600;letter-spacing:0.22em;text-transform:uppercase;color:var(--dim);">My Stats</span>
+      <button id="inGameStatsCloseBtn" style="background:none;border:none;color:var(--dim);font-size:1.4rem;cursor:pointer;padding:0;line-height:1;font-family:inherit;" onmouseover="this.style.color='var(--text)'" onmouseout="this.style.color='var(--dim)'">×</button>
+    </div>
+    <div id="inGameStatsContent">
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:8px;">
+        <div class="stat-tile"><div class="stat-value" id="igsGamesPlayed">—</div><div class="stat-label">Games</div></div>
+        <div class="stat-tile"><div class="stat-value" id="igsWins">—</div><div class="stat-label">⭐ Wins</div></div>
+        <div class="stat-tile"><div class="stat-value" id="igsLosses">—</div><div class="stat-label">Losses</div></div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:24px;">
+        <div class="stat-tile"><div class="stat-value" id="igsStreak">—</div><div class="stat-label">🔥 Streak</div></div>
+        <div class="stat-tile"><div class="stat-value" id="igsBestStreak">—</div><div class="stat-label">Best</div></div>
+        <div class="stat-tile"><div class="stat-value" id="igsWinRate">—</div><div class="stat-label">Win Rate</div></div>
+      </div>
+      <div style="font-size:0.6rem;font-weight:600;letter-spacing:0.22em;text-transform:uppercase;color:var(--dim);margin-bottom:10px;">Past Games</div>
+      <div id="igsPastGamesList"><p style="font-size:0.78rem;color:var(--dim);padding:4px 0;">Loading…</p></div>
+    </div>
   </div>
 </div>
 
