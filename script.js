@@ -3191,10 +3191,15 @@ document.getElementById('friendReqPopupView').addEventListener('click', () => {
 // Chain log modal
 // In-game stats modal
 async function showInGameStats() {
-  if (!currentUser || !db) return;
   const modal = document.getElementById('inGameStatsModal');
   if (!modal) return;
   modal.style.display = 'block';
+
+  if (!currentUser || !db) {
+    const content = document.getElementById('inGameStatsContent');
+    if (content) content.innerHTML = '<p style="font-size:0.82rem;color:var(--dim);text-align:center;padding:24px 0;">Sign in to see your stats</p>';
+    return;
+  }
 
   const setEl = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
   try {
