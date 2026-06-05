@@ -535,7 +535,9 @@ async function isTheatricalOrStreaming(movieId) {
   try {
     const data = await tmdbFetch(`/movie/${movieId}/release_dates`);
     const allTypes = (data.results ?? []).flatMap(r => (r.release_dates ?? []).map(d => d.type));
-    const ok = allTypes.includes(3) || allTypes.includes(6);
+    // Allow: theatrical (3), limited theatrical (2), digital/streaming (4)
+    // Block: physical-only (5) or TV-only (6) with no wider release
+    const ok = allTypes.includes(3) || allTypes.includes(2) || allTypes.includes(4);
     _releaseDateCache[movieId] = ok;
     return ok;
   } catch (_) {
