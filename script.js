@@ -493,6 +493,14 @@ async function updateAuthUI() {
 }
 
 // ============================================================
+//  TV/direct-to-video denylist — TMDB IDs that slip past the
+//  release_dates filter due to bad metadata. Add as found.
+// ============================================================
+const MOVIE_DENYLIST = new Set([
+  176241,  // Prison Break: The Final Break (2009) — TV movie
+]);
+
+// ============================================================
 //  TMDB helpers
 // ============================================================
 async function tmdbFetch(path, params = {}) {
@@ -531,6 +539,7 @@ const _releaseDateCache = {};
 // Returns true if the movie has at least one theatrical (type 3) or streaming (type 6) release.
 // Rejects pure TV movies (type 4 only) and direct-to-physical (type 5 only) that slip past video:true.
 async function isTheatricalOrStreaming(movieId) {
+  if (MOVIE_DENYLIST.has(movieId)) return false;
   if (_releaseDateCache[movieId] !== undefined) return _releaseDateCache[movieId];
   try {
     const data = await tmdbFetch(`/movie/${movieId}/release_dates`);
