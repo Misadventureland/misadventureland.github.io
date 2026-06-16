@@ -674,8 +674,158 @@
     <button class="btn btn-outline" id="joinBtn">Join Game</button>
   </div>
 
+  <div class="divider">or try</div>
+
+  <button class="btn btn-outline" id="castGameBtn" style="margin-bottom:0;">The Cast Game</button>
+  <p style="text-align:center;font-size:0.62rem;color:var(--dim);margin-top:8px;letter-spacing:0.06em;">Name every actor in a movie or show</p>
+
   <div style="text-align:center;margin-top:20px;">
     <button id="practiceBtn" style="background:none;border:none;color:var(--dim);font-size:0.68rem;font-weight:500;letter-spacing:0.16em;cursor:pointer;font-family:inherit;text-transform:uppercase;padding:8px;">Solo Practice</button>
+  </div>
+</div>
+
+<!-- ══ CAST GAME LANDING ════════════════════════════ -->
+<div id="screen-cast-landing" class="screen">
+  <h1>The Cast Game</h1>
+  <p class="subtitle">Name the cast. Outlast the room.</p>
+
+  <div class="card">
+    <label for="castPlayerName">Your Name</label>
+    <input type="text" id="castPlayerName" placeholder="Enter your name" maxlength="20" autocomplete="off">
+  </div>
+
+  <button class="btn btn-gold" id="castCreateBtn">Create Game</button>
+
+  <div class="divider">or join a game</div>
+
+  <div class="card">
+    <label for="castJoinCode">Room Code</label>
+    <input type="text" id="castJoinCode" placeholder="A B C D" maxlength="4"
+           autocomplete="off" spellcheck="false"
+           style="text-transform:uppercase;letter-spacing:0.4em;font-size:1.5rem;text-align:center;">
+    <button class="btn btn-outline" id="castJoinBtn">Join Game</button>
+  </div>
+
+  <div style="text-align:center;margin-top:20px;">
+    <button id="castBackBtn" style="background:none;border:none;color:var(--dim);font-size:0.68rem;font-weight:500;letter-spacing:0.16em;cursor:pointer;font-family:inherit;text-transform:uppercase;padding:8px;">← Back</button>
+  </div>
+</div>
+
+<!-- ══ CAST LOBBY ════════════════════════════════════ -->
+<div id="screen-cast-lobby" class="screen">
+  <h1>The Cast Game</h1>
+
+  <div class="card">
+    <div class="room-code-wrap">
+      <p class="room-code-label">Room Code</p>
+      <p class="room-code" id="castLobbyCode" title="Click to copy">----</p>
+      <p class="room-code-hint">Click code to copy &bull; Share with friends</p>
+    </div>
+  </div>
+
+  <div class="card">
+    <label>Players (<span id="castPlayerCount">0</span> / 8)</label>
+    <ul class="players-list" id="castPlayersList"></ul>
+    <p id="castLobbyWait" style="font-size:0.72rem;color:var(--dim);margin-top:14px;text-align:center;letter-spacing:0.06em;">
+      Waiting for more players to join&hellip;
+    </p>
+  </div>
+
+  <button class="btn btn-gold" id="castStartBtn" disabled>Waiting for players…</button>
+  <button class="btn btn-outline" id="castLeaveLobbyBtn" style="margin-top:8px;">Leave</button>
+</div>
+
+<!-- ══ CAST GAME ══════════════════════════════════════ -->
+<div id="screen-cast-game" class="screen">
+  <div class="game-topbar">
+    <div>
+      <div class="turn-label" id="castTurnLabel">Now playing</div>
+      <div class="turn-name" id="castTurnName">&mdash;</div>
+    </div>
+    <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;">
+      <div class="room-tag">Room: <span id="castGameCode"></span></div>
+      <button id="castLeaveBtn" style="background:none;border:none;color:var(--dim);font-size:0.62rem;letter-spacing:0.14em;cursor:pointer;font-family:inherit;text-transform:uppercase;padding:0;font-weight:500;" onmouseover="this.style.color='#c0182b'" onmouseout="this.style.color='var(--dim)'">Leave</button>
+    </div>
+  </div>
+
+  <!-- Subject card -->
+  <div class="card" style="text-align:center;margin-bottom:10px;">
+    <div style="font-size:0.52rem;font-weight:600;letter-spacing:0.26em;text-transform:uppercase;color:var(--dim);margin-bottom:6px;" id="castSubjectLabel">Naming cast of</div>
+    <div style="font-size:1.2rem;font-weight:700;color:var(--text);" id="castSubjectTitle">—</div>
+    <div style="font-size:0.65rem;color:var(--dim);margin-top:3px;" id="castSubjectYear"></div>
+  </div>
+
+  <!-- Players status -->
+  <div id="castPlayersStatus" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px;"></div>
+
+  <!-- Named actors so far -->
+  <div class="card" style="margin-bottom:10px;">
+    <label>Named so far (<span id="castNamedCount">0</span>)</label>
+    <div id="castNamedList" class="chain-log" style="max-height:220px;overflow-y:auto;"></div>
+  </div>
+
+  <!-- Input area — shown only on your turn -->
+  <div id="castInputArea" style="display:none;">
+    <div class="card">
+      <label id="castInputLabel">Name an actor</label>
+      <div style="position:relative;">
+        <input type="text" id="castInput" placeholder="Actor name…" maxlength="60" autocomplete="off" spellcheck="false">
+        <div id="castSuggestions" class="suggestions"></div>
+      </div>
+      <p id="castFeedback" style="font-size:0.78rem;min-height:20px;margin-top:8px;letter-spacing:0.03em;"></p>
+      <button class="btn btn-gold" id="castSubmitBtn" style="margin-top:8px;">Submit</button>
+      <button id="castPassBtn" style="margin-top:8px;width:100%;background:none;border:1px solid var(--bd2);color:var(--dim);font-size:0.62rem;font-weight:600;letter-spacing:0.14em;text-transform:uppercase;cursor:pointer;font-family:inherit;padding:10px;" onmouseover="this.style.borderColor='var(--red)';this.style.color='var(--red)'" onmouseout="this.style.borderColor='var(--bd2)';this.style.color='var(--dim)'">Can't name one — I'm out</button>
+    </div>
+  </div>
+
+  <!-- Waiting message — shown when it's not your turn -->
+  <div id="castWaitArea" style="display:none;">
+    <div class="card" style="text-align:center;padding:24px;">
+      <p style="font-size:0.82rem;color:var(--dim);margin:0;" id="castWaitMsg">Waiting for other players…</p>
+    </div>
+  </div>
+
+  <!-- Host picks the subject -->
+  <div id="castPickArea" style="display:none;">
+    <div class="card">
+      <label id="castPickLabel">Pick a movie or TV show</label>
+      <div style="position:relative;">
+        <input type="text" id="castPickInput" placeholder="Search movies &amp; TV shows…" maxlength="100" autocomplete="off" spellcheck="false">
+        <div id="castPickSuggestions" class="suggestions"></div>
+      </div>
+      <p id="castPickFeedback" style="font-size:0.78rem;min-height:20px;margin-top:8px;letter-spacing:0.03em;"></p>
+      <button class="btn btn-gold" id="castPickBtn" style="margin-top:8px;">Start Round</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ CAST GAME OVER ════════════════════════════════ -->
+<div id="screen-cast-gameover" class="screen">
+  <h1>The Cast Game</h1>
+  <p class="subtitle">Game Over</p>
+
+  <div class="card winner-card" style="text-align:center;border-color:rgba(201,168,76,0.55);padding:28px 20px 24px;position:relative;">
+    <span style="position:absolute;top:-1px;left:-1px;width:18px;height:18px;border-top:2px solid #c9a84c;border-left:2px solid #c9a84c;display:block;"></span>
+    <span style="position:absolute;top:-1px;right:-1px;width:18px;height:18px;border-top:2px solid #c9a84c;border-right:2px solid #c9a84c;display:block;"></span>
+    <span style="position:absolute;bottom:-1px;left:-1px;width:18px;height:18px;border-bottom:2px solid #c9a84c;border-left:2px solid #c9a84c;display:block;"></span>
+    <span style="position:absolute;bottom:-1px;right:-1px;width:18px;height:18px;border-bottom:2px solid #c9a84c;border-right:2px solid #c9a84c;display:block;"></span>
+    <p style="font-size:.56rem;font-weight:700;letter-spacing:.36em;text-transform:uppercase;color:#c9a84c;margin-bottom:12px;">✦ &nbsp;Winner&nbsp; ✦</p>
+    <p class="winner-name" id="castWinnerName" style="margin:0;">&mdash;</p>
+  </div>
+
+  <div class="card" style="margin-top:10px;">
+    <label>The Cast of <span id="castGameoverSubject" style="color:var(--text);font-style:italic;"></span></label>
+    <div id="castGameoverList" class="chain-log"></div>
+  </div>
+
+  <div class="card" style="margin-top:10px;">
+    <label>Final Standings</label>
+    <div id="castFinalScores"></div>
+  </div>
+
+  <div style="display:flex;gap:10px;margin-top:16px;">
+    <button class="btn btn-outline" id="castRematchBtn" style="flex:1;margin:0;">Rematch →</button>
+    <button class="btn btn-gold" id="castNewGameBtn" style="flex:1;margin:0;">New Game</button>
   </div>
 </div>
 

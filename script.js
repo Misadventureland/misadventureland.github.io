@@ -3556,3 +3556,560 @@ window.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('playerName').focus();
   }
 });
+
+// ============================================================
+//  THE CAST GAME
+// ============================================================
+
+// --- State ---
+let castRoomId   = null;
+let castRoomRef  = null;
+let castRoomSnap = null;
+let castListener = null;
+let castMe       = { id: null, name: null };
+let castIsHost   = false;
+let castPicked   = null;  // { tmdbId, title, mediaType }
+let castStatsWritten = false;
+
+// --- TMDB helpers ---
+async function searchMovieOrTV(query) {
+  if (query.length < 2) return [];
+  const [movieData, tvData] = await Promise.all([
+    tmdbFetch('/search/movie', { query, language: 'en-US' }),
+    tmdbFetch('/search/tv',    { query, language: 'en-US' }),
+  ]);
+  const movies = (movieData.results ?? []).filter(m => !m.video).slice(0, 4).map(m => ({
+    tmdbId: m.id, title: m.title, mediaType: 'movie',
+    year: m.release_date?.slice(0, 4) ?? '',
+    imagePath: m.poster_path ?? null,
+  }));
+  const shows = (tvData.results ?? []).slice(0, 3).map(t => ({
+    tmdbId: t.id, title: t.name, mediaType: 'tv',
+    year: t.first_air_date?.slice(0, 4) ?? '',
+    imagePath: t.poster_path ?? null,
+  }));
+  return [...movies, ...shows].slice(0, 6);
+}
+
+async function fetchFullCast(tmdbId, mediaType) {
+  if (mediaType === 'tv') {
+    const data = await tmdbFetch(`/tv/${tmdbId}/aggregate_credits`);
+    return (data.cast ?? []).map(c => ({ id: c.id, name: c.name }));
+  }
+  const data = await tmdbFetch(`/movie/${tmdbId}/credits`);
+  return (data.cast ?? []).map(c => ({ id: c.id, name: c.name }));
+}
+
+async function searchCastMember(query, tmdbId, mediaType) {
+  const cast = await fetchFullCast(tmdbId, mediaType);
+  const q = query.toLowerCase();
+  return cast.filter(c => c.name.toLowerCase().includes(q)).slice(0, 6);
+}
+
+// --- Room creation/join ---
+async function castCreateRoom(name) {
+  castMe.id   = currentUser ? currentUser.uid : uid();
+  castMe.name = name;
+  castRoomId  = genRoomCode();
+  castIsHost  = true;
+  castStatsWritten = false;
+  castRoomRef = db.ref(`castRooms/${castRoomId}`);
+
+  await castRoomRef.set({
+    hostId:      castMe.id,
+    status:      'waiting',
+    currentIdx:  0,
+    pickerIdx:   0,
+    subject:     null,
+    usedActors:  {},
+    namedList:   [],
+    players:     { [castMe.id]: { name, order: 0, out: false, elimOrder: 0 } },
+    playerOrder: [castMe.id],
+    winner:      null,
+  });
+
+  castRoomRef.onDisconnect().update({ [`players/${castMe.id}/connected`]: false });
+  castAttachListener();
+  castGoLobby();
+}
+
+async function castJoinRoom(name, code) {
+  const snap = await db.ref(`castRooms/${code}`).once('value');
+  if (!snap.exists()) { alert('Room not found — check the code and try again.'); return; }
+  const state = snap.val();
+  if (state.status === 'finished') { alert('That game has already finished.'); return; }
+  if (state.status === 'playing')  { alert('That game is already in progress.'); return; }
+
+  const order = toArray(state.playerOrder);
+  if (order.length >= 8) { alert('That room is full.'); return; }
+
+  castMe.id   = currentUser ? currentUser.uid : uid();
+  castMe.name = name;
+  castRoomId  = code;
+  castIsHost  = false;
+  castStatsWritten = false;
+  castRoomRef = db.ref(`castRooms/${castRoomId}`);
+
+  await castRoomRef.update({
+    [`players/${castMe.id}`]: { name, order: order.length, out: false, elimOrder: 0 },
+    playerOrder: [...order, castMe.id],
+  });
+
+  castRoomRef.onDisconnect().update({ [`players/${castMe.id}/connected`]: false });
+  castAttachListener();
+  castGoLobby();
+}
+
+function castGoLobby() {
+  showScreen('screen-cast-lobby');
+  document.getElementById('castLobbyCode').textContent = castRoomId;
+  document.getElementById('castGameCode').textContent  = castRoomId;
+}
+
+// --- Listener ---
+function castAttachListener() {
+  if (castListener) castRoomRef.off('value', castListener);
+  castListener = castRoomRef.on('value', snap => {
+    if (!snap.exists()) return;
+    castRoomSnap = snap.val();
+    onCastRoomChange();
+  });
+}
+
+function onCastRoomChange() {
+  const s   = castRoomSnap.status;
+  const cur = document.querySelector('.screen.active')?.id;
+
+  if (s === 'waiting'  && cur !== 'screen-cast-lobby')    showScreen('screen-cast-lobby');
+  if (s === 'playing'  && cur !== 'screen-cast-game')     showScreen('screen-cast-game');
+  if (s === 'finished' && cur !== 'screen-cast-gameover') {
+    castRenderGameOver();
+    showScreen('screen-cast-gameover');
+  }
+
+  if (s === 'waiting') castRenderLobby();
+  if (s === 'playing') castRenderGame();
+}
+
+// --- Lobby render ---
+function castRenderLobby() {
+  const players = castRoomSnap.players ?? {};
+  const order   = toArray(castRoomSnap.playerOrder);
+  document.getElementById('castLobbyCode').textContent   = castRoomId;
+  document.getElementById('castPlayerCount').textContent = order.length;
+
+  document.getElementById('castPlayersList').innerHTML = order.map(pid => {
+    const p = players[pid] ?? {};
+    return `<li style="${pid === castMe.id ? 'color:#ede9e3;font-weight:600' : ''}">
+      ${escHtml(p.name ?? '?')}
+      ${pid === castRoomSnap.hostId ? '<span class="host-badge">HOST</span>' : ''}
+      ${pid === castMe.id ? '<span class="me-badge">(you)</span>' : ''}
+    </li>`;
+  }).join('');
+
+  const startBtn = document.getElementById('castStartBtn');
+  const amHost   = castMe.id === castRoomSnap.hostId;
+  startBtn.style.display = amHost ? 'block' : 'none';
+  const enough = order.length >= 2;
+  startBtn.disabled    = !enough;
+  startBtn.textContent = enough ? `Start Game (${order.length} players)` : 'Waiting for players…';
+  document.getElementById('castLobbyWait').style.display = enough ? 'none' : 'block';
+}
+
+async function castStartGame() {
+  if (!castRoomSnap || toArray(castRoomSnap.playerOrder).length < 2) return;
+  await castRoomRef.update({ status: 'playing', currentIdx: 0, pickerIdx: 0 });
+}
+
+// --- Game render ---
+function castRenderGame() {
+  if (!castRoomSnap) return;
+  const players    = castRoomSnap.players  ?? {};
+  const order      = toArray(castRoomSnap.playerOrder);
+  const activePids = order.filter(p => !players[p]?.out);
+  const subject    = castRoomSnap.subject;
+  const pickerIdx  = castRoomSnap.pickerIdx ?? 0;
+  const pickerPid  = order[pickerIdx % order.length];
+  const curIdx     = castRoomSnap.currentIdx ?? 0;
+  const curPid     = activePids[curIdx % activePids.length];
+  const isMyTurn   = curPid === castMe.id;
+  const amPicker   = pickerPid === castMe.id;
+
+  // Subject header
+  document.getElementById('castSubjectTitle').textContent = subject?.title ?? '—';
+  document.getElementById('castSubjectYear').textContent  = subject?.year  ?? '';
+  document.getElementById('castSubjectLabel').textContent = subject ? 'Naming cast of' : 'Waiting for subject…';
+
+  // Turn label
+  document.getElementById('castTurnLabel').textContent = subject ? 'Now naming' : 'Picking subject';
+  document.getElementById('castTurnName').textContent  = subject
+    ? (isMyTurn ? 'Your turn!' : (players[curPid]?.name ?? '?'))
+    : (amPicker ? 'You' : (players[pickerPid]?.name ?? '?'));
+
+  // Players status pills
+  document.getElementById('castPlayersStatus').innerHTML = order.map(pid => {
+    const p    = players[pid] ?? {};
+    const out  = p.out;
+    const cur  = pid === curPid && subject;
+    const you  = pid === castMe.id;
+    return `<span style="font-size:0.62rem;padding:3px 8px;border-radius:2px;border:1px solid ${
+      out ? 'var(--bd)' : cur ? '#c9a84c' : 'var(--bd2)'
+    };color:${out ? 'var(--dim)' : cur ? '#c9a84c' : 'var(--text)'};${out ? 'text-decoration:line-through;opacity:0.4;' : ''}">
+      ${escHtml(p.name ?? '?')}${you ? ' (you)' : ''}${out ? ' ✗' : ''}
+    </span>`;
+  }).join('');
+
+  // Named list
+  const named = castRoomSnap.namedList ?? [];
+  document.getElementById('castNamedCount').textContent = named.length;
+  document.getElementById('castNamedList').innerHTML = named.length
+    ? named.map(a => `<div class="chain-log-item"><span class="icon">⭐</span><span>${escHtml(a.name)}</span></div>`).join('')
+    : '<p style="color:var(--dim);font-size:0.82rem;padding:8px 0;">None yet — be first!</p>';
+
+  // Show correct panel
+  const pickArea  = document.getElementById('castPickArea');
+  const inputArea = document.getElementById('castInputArea');
+  const waitArea  = document.getElementById('castWaitArea');
+
+  pickArea.style.display  = 'none';
+  inputArea.style.display = 'none';
+  waitArea.style.display  = 'none';
+
+  if (!subject) {
+    if (amPicker) {
+      pickArea.style.display = 'block';
+    } else {
+      waitArea.style.display = 'block';
+      document.getElementById('castWaitMsg').textContent =
+        `${escHtml(players[pickerPid]?.name ?? '?')} is picking a movie or show…`;
+    }
+  } else if (isMyTurn) {
+    inputArea.style.display = 'block';
+    setFeedback('castFeedback', '', '');
+  } else {
+    waitArea.style.display = 'block';
+    document.getElementById('castWaitMsg').textContent = activePids.length > 1
+      ? `${escHtml(players[curPid]?.name ?? '?')}'s turn…`
+      : 'Last player standing!';
+  }
+}
+
+// --- Submit subject (picker) ---
+async function castSubmitSubject() {
+  if (!castPicked) {
+    setFeedback('castPickFeedback', 'Pick a movie or show from the list', 'var(--red)');
+    return;
+  }
+  setFeedback('castPickFeedback', 'Loading cast…', 'var(--dim)');
+  try {
+    const cast = await fetchFullCast(castPicked.tmdbId, castPicked.mediaType);
+    if (!cast.length) {
+      setFeedback('castPickFeedback', 'No cast found — try another', 'var(--red)');
+      return;
+    }
+    await castRoomRef.update({
+      subject: { ...castPicked, castIds: cast.map(c => c.id) },
+    });
+    castPicked = null;
+    document.getElementById('castPickInput').value = '';
+    clearSuggestionsEl('castPickSuggestions');
+  } catch (e) {
+    setFeedback('castPickFeedback', 'Something went wrong — try again', 'var(--red)');
+  }
+}
+
+// --- Submit actor (player) ---
+async function castSubmitActor() {
+  if (!castPickedActor) {
+    setFeedback('castFeedback', 'Pick an actor from the list', 'var(--red)');
+    return;
+  }
+  const subject    = castRoomSnap.subject;
+  const usedActors = castRoomSnap.usedActors ?? {};
+  const castIds    = subject?.castIds ?? [];
+
+  if (usedActors[castPickedActor.id]) {
+    setFeedback('castFeedback', `${castPickedActor.name} was already named`, 'var(--red)');
+    return;
+  }
+  if (!castIds.includes(castPickedActor.id)) {
+    setFeedback('castFeedback', `${castPickedActor.name} isn't in ${subject.title}`, 'var(--red)');
+    return;
+  }
+
+  const order      = toArray(castRoomSnap.playerOrder);
+  const players    = castRoomSnap.players ?? {};
+  const activePids = order.filter(p => !players[p]?.out);
+  const nextIdx    = (castRoomSnap.currentIdx + 1) % activePids.length;
+  const namedList  = [...(castRoomSnap.namedList ?? []), { id: castPickedActor.id, name: castPickedActor.name }];
+
+  await castRoomRef.update({
+    [`usedActors/${castPickedActor.id}`]: true,
+    namedList,
+    currentIdx: nextIdx,
+  });
+
+  castPickedActor = null;
+  document.getElementById('castInput').value = '';
+  clearSuggestionsEl('castSuggestions');
+  setFeedback('castFeedback', '', '');
+}
+
+// --- Pass (can't name one — eliminated) ---
+async function castPass() {
+  if (!confirm("You can't name anyone? You'll be eliminated.")) return;
+  const order      = toArray(castRoomSnap.playerOrder);
+  const players    = castRoomSnap.players ?? {};
+  const activePids = order.filter(p => !players[p]?.out);
+  const elimCount  = order.filter(p => players[p]?.out).length;
+
+  const updates = {
+    [`players/${castMe.id}/out`]:       true,
+    [`players/${castMe.id}/elimOrder`]: elimCount + 1,
+  };
+
+  const remaining = activePids.filter(p => p !== castMe.id);
+  if (remaining.length === 1) {
+    // Last one standing — game over
+    updates.winner = remaining[0];
+    updates.status = 'finished';
+    if (currentUser && !castStatsWritten) {
+      castStatsWritten = true;
+      const didWin = remaining[0] === castMe.id;
+      writeCastGameStats(didWin);
+      writeCastGameHistory(players, remaining[0]);
+    }
+  } else {
+    // Advance turn to next active player
+    const myActiveIdx = activePids.indexOf(castMe.id);
+    const nextPid     = remaining[myActiveIdx % remaining.length];
+    const nextIdx     = remaining.indexOf(nextPid);
+    updates.currentIdx = nextIdx;
+  }
+
+  await castRoomRef.update(updates);
+}
+
+// --- Game over render ---
+function castRenderGameOver() {
+  if (!castRoomSnap) return;
+  const players = castRoomSnap.players ?? {};
+  const order   = toArray(castRoomSnap.playerOrder);
+  const winner  = castRoomSnap.winner;
+
+  if (currentUser && !castStatsWritten) {
+    castStatsWritten = true;
+    writeCastGameStats(winner === castMe.id);
+    writeCastGameHistory(players, winner);
+  }
+
+  document.getElementById('castWinnerName').textContent    = players[winner]?.name ?? '—';
+  document.getElementById('castGameoverSubject').textContent = castRoomSnap.subject?.title ?? '?';
+
+  const named = castRoomSnap.namedList ?? [];
+  document.getElementById('castGameoverList').innerHTML = named.length
+    ? named.map(a => `<div class="chain-log-item"><span class="icon">⭐</span><span>${escHtml(a.name)}</span></div>`).join('')
+    : '<p style="color:var(--dim);font-size:0.82rem;">No actors were named.</p>';
+
+  // Standings: sort by elimination order (lower = survived longer), winner last
+  const sorted = [...order].sort((a, b) => {
+    if (a === winner) return 1;
+    if (b === winner) return -1;
+    return (players[b]?.elimOrder ?? 0) - (players[a]?.elimOrder ?? 0);
+  });
+  document.getElementById('castFinalScores').innerHTML = sorted.map(pid => {
+    const p = players[pid] ?? {};
+    const w = pid === winner;
+    return `<div class="score-row" style="align-items:center;">
+      <span style="color:${w ? '#ede9e3' : 'var(--dim)'};font-weight:${w ? '600' : '400'};flex:1;">${escHtml(p.name ?? '?')}${w ? ' ◆' : ''}</span>
+      <span style="font-size:0.72rem;color:var(--dim);">${w ? '🏆 Winner' : `Out ${p.elimOrder ?? '?'}`}</span>
+    </div>`;
+  }).join('');
+}
+
+// --- Stats / history ---
+async function writeCastGameStats(didWin) {
+  if (!currentUser || !db) return;
+  try {
+    await db.ref(`users/${currentUser.uid}`).transaction(prev => {
+      if (!prev) prev = {};
+      const newStreak = didWin ? (prev.currentStreak ?? 0) + 1 : 0;
+      return {
+        ...prev,
+        displayName:    currentUser.displayName ?? '',
+        gamesPlayed:    (prev.gamesPlayed   ?? 0) + 1,
+        wins:           (prev.wins          ?? 0) + (didWin ? 1 : 0),
+        losses:         (prev.losses        ?? 0) + (didWin ? 0 : 1),
+        currentStreak:  newStreak,
+        bestStreak:     Math.max(prev.bestStreak ?? 0, newStreak),
+      };
+    });
+  } catch (e) { console.error('Cast stats write failed:', e); }
+}
+
+async function writeCastGameHistory(players, winnerId) {
+  if (!currentUser || !db || !castRoomSnap) return;
+  try {
+    const opponents = Object.entries(players)
+      .filter(([pid]) => pid !== currentUser.uid)
+      .map(([, p]) => p.name ?? '?');
+    await db.ref(`users/${currentUser.uid}/gameHistory`).push({
+      ts:        Date.now(),
+      mode:      'cast',
+      word:      castRoomSnap.subject?.title ?? '',
+      won:       winnerId === castMe.id,
+      winner:    players[winnerId]?.name ?? '?',
+      opponents,
+      chainLen:  (castRoomSnap.namedList ?? []).length,
+      chain:     (castRoomSnap.namedList ?? []).map(a => ({ name: a.name, type: 'actor' })),
+    });
+  } catch (e) { console.error('Cast history write failed:', e); }
+}
+
+// --- Autocomplete for picker ---
+let castPickDebounce = null;
+document.getElementById('castPickInput').addEventListener('input', function () {
+  clearTimeout(castPickDebounce);
+  castPicked = null;
+  const q = this.value.trim();
+  if (!q) { clearSuggestionsEl('castPickSuggestions'); return; }
+  castPickDebounce = setTimeout(async () => {
+    const results = await searchMovieOrTV(q);
+    const el = document.getElementById('castPickSuggestions');
+    if (!el) return;
+    if (!results.length) { clearSuggestionsEl('castPickSuggestions'); return; }
+    el.innerHTML = results.map((r, i) => {
+      const img = tmdbImg(r.imagePath);
+      return `<div class="suggestion-item" data-i="${i}">
+        ${img ? `<img class="suggestion-thumb" src="${img}" alt="" loading="lazy">` : `<div class="suggestion-thumb"></div>`}
+        <div style="flex:1;min-width:0;">
+          <div class="suggestion-title">${escHtml(r.title)}</div>
+          <div class="suggestion-sub">${r.mediaType === 'tv' ? 'TV' : 'Movie'}${r.year ? ` · ${r.year}` : ''}</div>
+        </div>
+      </div>`;
+    }).join('');
+    el.querySelectorAll('.suggestion-item').forEach((item, i) => {
+      item.addEventListener('mousedown', e => {
+        e.preventDefault();
+        castPicked = results[i];
+        document.getElementById('castPickInput').value = results[i].title;
+        clearSuggestionsEl('castPickSuggestions');
+      });
+    });
+    el.classList.add('open');
+  }, 220);
+});
+
+// --- Autocomplete for actor input ---
+let castPickedActor  = null;
+let castActorDebounce = null;
+document.getElementById('castInput').addEventListener('input', function () {
+  clearTimeout(castActorDebounce);
+  castPickedActor = null;
+  const q = this.value.trim();
+  if (!q || !castRoomSnap?.subject) { clearSuggestionsEl('castSuggestions'); return; }
+  castActorDebounce = setTimeout(async () => {
+    const { tmdbId, mediaType } = castRoomSnap.subject;
+    const results = await searchCastMember(q, tmdbId, mediaType);
+    const el = document.getElementById('castSuggestions');
+    if (!el) return;
+    if (!results.length) { clearSuggestionsEl('castSuggestions'); return; }
+    const used = castRoomSnap.usedActors ?? {};
+    el.innerHTML = results.map((r, i) => {
+      const isUsed = used[r.id];
+      return `<div class="suggestion-item" data-i="${i}" style="${isUsed ? 'opacity:0.35;pointer-events:none;' : ''}">
+        <div class="suggestion-thumb round"></div>
+        <div style="flex:1;min-width:0;">
+          <div class="suggestion-title">${escHtml(r.name)}${isUsed ? ' <span style="font-size:0.6rem;color:var(--dim);">already named</span>' : ''}</div>
+        </div>
+      </div>`;
+    }).join('');
+    el.querySelectorAll('.suggestion-item').forEach((item, i) => {
+      item.addEventListener('mousedown', e => {
+        e.preventDefault();
+        castPickedActor = results[i];
+        document.getElementById('castInput').value = results[i].name;
+        clearSuggestionsEl('castSuggestions');
+      });
+    });
+    el.classList.add('open');
+  }, 220);
+});
+
+// --- Button wiring ---
+document.getElementById('castGameBtn').addEventListener('click', () => showScreen('screen-cast-landing'));
+document.getElementById('castBackBtn').addEventListener('click', () => showScreen('screen-landing'));
+
+document.getElementById('castCreateBtn').addEventListener('click', async () => {
+  const name = document.getElementById('castPlayerName').value.trim();
+  if (!name) { alert('Enter your name first'); return; }
+  if (!db) { alert('Firebase not connected'); return; }
+  await castCreateRoom(name);
+});
+
+document.getElementById('castJoinBtn').addEventListener('click', async () => {
+  const name = document.getElementById('castPlayerName').value.trim();
+  const code = document.getElementById('castJoinCode').value.trim().toUpperCase();
+  if (!name) { alert('Enter your name first'); return; }
+  if (code.length !== 4) { alert('Enter a 4-character room code'); return; }
+  if (!db) { alert('Firebase not connected'); return; }
+  await castJoinRoom(name, code);
+});
+
+document.getElementById('castStartBtn').addEventListener('click', castStartGame);
+
+document.getElementById('castLeaveLobbyBtn').addEventListener('click', () => {
+  if (castRoomRef) castRoomRef.off('value', castListener);
+  castRoomRef = null; castRoomSnap = null; castRoomId = null;
+  showScreen('screen-cast-landing');
+});
+
+document.getElementById('castLeaveBtn').addEventListener('click', () => {
+  if (!confirm('Leave the game? You\'ll be eliminated.')) return;
+  castPass();
+  setTimeout(() => { showScreen('screen-landing'); }, 300);
+});
+
+document.getElementById('castPickBtn').addEventListener('click', castSubmitSubject);
+document.getElementById('castPickInput').addEventListener('keydown', e => { if (e.key === 'Enter') castSubmitSubject(); });
+
+document.getElementById('castSubmitBtn').addEventListener('click', castSubmitActor);
+document.getElementById('castInput').addEventListener('keydown', e => { if (e.key === 'Enter') castSubmitActor(); });
+
+document.getElementById('castPassBtn').addEventListener('click', castPass);
+
+document.getElementById('castLobbyCode').addEventListener('click', function () {
+  navigator.clipboard.writeText(castRoomId ?? '').catch(() => {});
+  const orig = this.textContent;
+  this.textContent = 'Copied!';
+  setTimeout(() => { this.textContent = orig; }, 1200);
+});
+
+document.getElementById('castRematchBtn').addEventListener('click', async () => {
+  if (!castRoomRef) return;
+  const order   = toArray(castRoomSnap.playerOrder);
+  const players = castRoomSnap.players ?? {};
+  const reset   = {};
+  order.forEach(pid => {
+    reset[`players/${pid}/out`]       = false;
+    reset[`players/${pid}/elimOrder`] = 0;
+  });
+  const nextPickerIdx = ((castRoomSnap.pickerIdx ?? 0) + 1) % order.length;
+  await castRoomRef.update({
+    ...reset,
+    status:      'waiting',
+    currentIdx:  0,
+    pickerIdx:   nextPickerIdx,
+    subject:     null,
+    usedActors:  {},
+    namedList:   [],
+    winner:      null,
+  });
+  castStatsWritten = false;
+});
+
+document.getElementById('castNewGameBtn').addEventListener('click', () => {
+  if (castRoomRef) castRoomRef.off('value', castListener);
+  castRoomRef = null; castRoomSnap = null; castRoomId = null;
+  showScreen('screen-cast-landing');
+});
