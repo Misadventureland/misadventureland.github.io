@@ -1207,6 +1207,55 @@
   </div>
 </div>
 
+<!-- Rules modal -->
+<div id="rulesModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.95);z-index:2000;overflow-y:auto;-webkit-overflow-scrolling:touch;">
+  <div style="max-width:520px;margin:0 auto;padding:40px 28px 80px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:28px;padding-bottom:16px;border-bottom:1px solid var(--bd);">
+      <span style="font-size:0.6rem;font-weight:600;letter-spacing:0.22em;text-transform:uppercase;color:var(--dim);">How to Play</span>
+      <button id="rulesCloseBtn" style="background:none;border:none;color:var(--dim);font-size:1.4rem;cursor:pointer;padding:0;line-height:1;font-family:inherit;" onmouseover="this.style.color='var(--text)'" onmouseout="this.style.color='var(--dim)'">×</button>
+    </div>
+
+    <h2 style="font-size:1.3rem;font-weight:700;color:var(--text);margin:0 0 6px;">Welcome to The Movie Game</h2>
+    <p style="font-size:0.82rem;color:var(--dim);margin:0 0 28px;font-style:italic;">Simple rules. Maximum arguments.</p>
+
+    <div style="display:flex;flex-direction:column;gap:22px;">
+
+      <div>
+        <div style="font-size:0.58rem;font-weight:700;letter-spacing:0.2em;text-transform:uppercase;color:#c9a84c;margin-bottom:8px;">How to Play</div>
+        <p style="font-size:0.88rem;color:var(--text);line-height:1.7;margin:0;">Start with a movie or an actor. The next player must name a movie that actor appeared in, or an actor who appeared in that movie. Keep the chain going — back and forth, movie to actor to movie.</p>
+      </div>
+
+      <div>
+        <div style="font-size:0.58rem;font-weight:700;letter-spacing:0.2em;text-transform:uppercase;color:#c9a84c;margin-bottom:8px;">No Aces</div>
+        <p style="font-size:0.88rem;color:var(--text);line-height:1.7;margin:0;">The opening movie or actor must have enough connections to give the next player a fair shot. You can't start with someone so obscure there's nowhere to go.</p>
+      </div>
+
+      <div>
+        <div style="font-size:0.58rem;font-weight:700;letter-spacing:0.2em;text-transform:uppercase;color:#c0182b;margin-bottom:8px;">Letters</div>
+        <p style="font-size:0.88rem;color:var(--text);line-height:1.7;margin:0;">Can't make a connection? You earn a letter. Spell out M-O-V-I-E and you're out. Last one standing wins.</p>
+      </div>
+
+      <div>
+        <div style="font-size:0.58rem;font-weight:700;letter-spacing:0.2em;text-transform:uppercase;color:#c9a84c;margin-bottom:8px;">Challenge ⚡</div>
+        <p style="font-size:0.88rem;color:var(--text);line-height:1.7;margin:0;">Not convinced someone knows their answer? Challenge them. If they named an actor, they must name another movie that actor has been in — other than the one just played. If they named a movie, they must name another actor from it — other than the one just named. Fail the challenge and they take the letter. Win it and the challenger does.</p>
+      </div>
+
+      <div>
+        <div style="font-size:0.58rem;font-weight:700;letter-spacing:0.2em;text-transform:uppercase;color:#c9a84c;margin-bottom:8px;">Reverse 🔄</div>
+        <p style="font-size:0.88rem;color:var(--text);line-height:1.7;margin:0;">Once per game you can flip the direction — play a movie or actor that connects backwards through the chain instead of forwards. Use it wisely.</p>
+      </div>
+
+    </div>
+
+    <p style="font-size:0.78rem;color:var(--dim);text-align:center;margin-top:36px;font-style:italic;">Good luck. Have fun. Don't die.</p>
+
+    <button id="rulesGotItBtn" style="margin-top:24px;width:100%;padding:14px;background:none;border:1px solid var(--bd2);color:var(--text);font-size:0.65rem;font-weight:600;letter-spacing:0.16em;text-transform:uppercase;cursor:pointer;font-family:inherit;transition:border-color 0.15s,color 0.15s;" onmouseover="this.style.borderColor='var(--text)'" onmouseout="this.style.borderColor='var(--bd2)'">Got it — let's play</button>
+  </div>
+</div>
+
+<!-- Persistent rules button — visible on all screens -->
+<button id="rulesBtn" style="position:fixed;bottom:20px;right:20px;z-index:1500;background:none;border:1px solid var(--bd2);color:var(--dim);font-size:0.52rem;font-weight:600;letter-spacing:0.14em;text-transform:uppercase;cursor:pointer;font-family:inherit;padding:7px 11px;transition:border-color 0.15s,color 0.15s;" onmouseover="this.style.borderColor='var(--text)';this.style.color='var(--text)'" onmouseout="this.style.borderColor='var(--bd2)';this.style.color='var(--dim)'">? Rules</button>
+
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>

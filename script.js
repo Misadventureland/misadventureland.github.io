@@ -3504,8 +3504,32 @@ function startQuoteRotation() {
   }, 5000);
 }
 
+// ============================================================
+//  Rules modal
+// ============================================================
+function openRules() {
+  document.getElementById('rulesModal').style.display = 'block';
+}
+function closeRules() {
+  document.getElementById('rulesModal').style.display = 'none';
+}
+document.getElementById('rulesBtn').addEventListener('click', openRules);
+document.getElementById('rulesCloseBtn').addEventListener('click', closeRules);
+document.getElementById('rulesGotItBtn').addEventListener('click', () => {
+  localStorage.setItem('rulesSeenV1', '1');
+  closeRules();
+});
+document.getElementById('rulesModal').addEventListener('click', function (e) {
+  if (e.target === this) closeRules();
+});
+
 window.addEventListener('DOMContentLoaded', async () => {
   startQuoteRotation();
+
+  // Show rules automatically on first visit (not signed in, never seen before)
+  if (!localStorage.getItem('rulesSeenV1')) {
+    openRules();
+  }
 
   if (firebaseReady) {
     // Wait for Firebase Auth to deliver its first state before attempting rejoin.
