@@ -371,8 +371,13 @@ async function tryRejoin() {
       if (snap.exists() && state.players?.[s.playerId] && state.status !== 'finished') {
         valid.push({ ...s, state });
       } else {
-        // Stale — clean up
+        // Stale — clean up from both Firebase and localStorage
         if (currentUser && db) db.ref(`users/${currentUser.uid}/activeSessions/${s.roomId}`).remove().catch(() => {});
+        try {
+          const all = JSON.parse(localStorage.getItem('sessions') || '{}');
+          delete all[s.roomId];
+          localStorage.setItem('sessions', JSON.stringify(all));
+        } catch (_) {}
       }
     } catch (_) {}
   }
