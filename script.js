@@ -530,12 +530,14 @@ async function updateAuthUI() {
       const gameName = stats?.gameName ?? currentUser.displayName ?? '';
       if (nameEl) nameEl.textContent = gameName;
 
-      // Sync to playerName if the user hasn't typed something different
-      const nameInput = document.getElementById('playerName');
-      if (nameInput) {
-        const cur = nameInput.value.trim();
-        if (!cur || cur === currentUser.displayName) nameInput.value = gameName;
-      }
+      // Sync to playerName and castPlayerName if the user hasn't typed something different
+      ['playerName', 'castPlayerName'].forEach(id => {
+        const nameInput = document.getElementById(id);
+        if (nameInput) {
+          const cur = nameInput.value.trim();
+          if (!cur || cur === currentUser.displayName) nameInput.value = gameName;
+        }
+      });
 
       // Auto-save Google display name as game name on first sign-in
       if (!stats?.gameName && currentUser.displayName) {
@@ -1085,32 +1087,31 @@ async function startGame() {
 // ============================================================
 //  Share invite link
 // ============================================================
-async function shareInviteLink() {
-  const url  = `${window.location.origin}${window.location.pathname}?room=${roomId}`;
-  const msg  = `I'm challenging you to a battle in The Movie Game! Room code: ${roomId}\n${url}`;
-  const btn  = document.getElementById('shareBtn');
+async function shareInviteLink(gameLabel = 'The Movie Game', rId = roomId, btnEl = null) {
+  const url  = `${window.location.origin}${window.location.pathname}?room=${rId}`;
+  const text = `I've challenged you to a round of ${gameLabel} — join here:`;
+  const msg  = `${text}\n${url}`;
+  const btn  = btnEl ?? document.getElementById('shareBtn');
 
-  // 1. Try native share sheet (works great on mobile)
   if (navigator.share) {
     try {
-      await navigator.share({ title: 'The Movie Game', text: `I'm challenging you to a battle in The Movie Game! Room code: ${roomId}`, url });
+      await navigator.share({ title: gameLabel, text, url });
       return;
     } catch (e) {
-      if (e.name === 'AbortError') return; // user cancelled — do nothing
-      // otherwise fall through to clipboard
+      if (e.name === 'AbortError') return;
     }
   }
 
-  // 2. Try clipboard API
   try {
     await navigator.clipboard.writeText(msg);
-    const orig = btn.textContent;
-    btn.textContent = '✓ Link copied!';
-    setTimeout(() => { btn.textContent = orig; }, 2500);
+    if (btn) {
+      const orig = btn.textContent;
+      btn.textContent = '✓ Link copied!';
+      setTimeout(() => { btn.textContent = orig; }, 2500);
+    }
     return;
-  } catch (_) { /* fall through */ }
+  } catch (_) {}
 
-  // 3. Last resort — browser prompt so they can copy manually
   window.prompt('Copy this invite link:', msg);
 }
 
@@ -3420,7 +3421,8 @@ document.getElementById('lobbyCode').addEventListener('click', function () {
   });
 });
 document.getElementById('startBtn').addEventListener('click', startGame);
-document.getElementById('shareBtn').addEventListener('click', shareInviteLink);
+document.getElementById('shareBtn').addEventListener('click', () => shareInviteLink('The Movie Game', roomId, document.getElementById('shareBtn')));
+document.getElementById('castShareBtn').addEventListener('click', () => shareInviteLink('The Cast Game', castRoomId, document.getElementById('castShareBtn')));
 document.getElementById('leaveLobbyBtn').addEventListener('click', leaveLobby);
 
 // Main answer input + autocomplete
