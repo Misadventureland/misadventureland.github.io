@@ -740,7 +740,18 @@
   </div>
 
   <button class="btn btn-gold" id="castStartBtn" disabled>Waiting for players…</button>
-  <button class="btn btn-outline" id="castLeaveLobbyBtn" style="margin-top:8px;">Leave</button>
+
+  <!-- Invite friends -->
+  <div id="castLobbyInviteSection" style="display:none;margin-top:10px;">
+    <div class="card" style="padding:16px 20px;">
+      <div style="font-size:0.52rem;font-weight:700;letter-spacing:0.24em;text-transform:uppercase;color:var(--dim);margin-bottom:10px;">Invite a Friend</div>
+      <div id="castLobbyInviteList"></div>
+    </div>
+  </div>
+
+  <div style="text-align:center;margin-top:16px;">
+    <button id="castLeaveLobbyBtn" style="background:none;border:none;color:var(--dim);font-size:0.62rem;font-weight:500;letter-spacing:0.14em;cursor:pointer;font-family:inherit;text-transform:uppercase;padding:4px 8px;">Leave Lobby</button>
+  </div>
 </div>
 
 <!-- ══ CAST GAME ══════════════════════════════════════ -->

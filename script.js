@@ -2695,9 +2695,9 @@ function renderGameInvites(invites) {
     <div style="display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--bd);">
       <div style="flex:1;min-width:0;">
         <div style="font-size:0.88rem;color:var(--text);font-weight:500;">${escHtml(inv.fromName ?? '?')}</div>
-        <div style="font-size:0.58rem;color:var(--dim);margin-top:2px;letter-spacing:0.06em;">invited you · Room ${escHtml(code)}</div>
+        <div style="font-size:0.58rem;color:var(--dim);margin-top:2px;letter-spacing:0.06em;">${inv.mode === 'cast' ? 'Cast Game' : 'Movie Game'} · Room ${escHtml(code)}</div>
       </div>
-      <button data-invite-join="${escHtml(code)}"
+      <button data-invite-join="${escHtml(code)}" data-invite-mode="${inv.mode ?? 'movie'}"
         style="background:var(--ok);color:#fff;border:none;padding:8px 14px;font-size:0.58rem;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;cursor:pointer;font-family:inherit;white-space:nowrap;flex-shrink:0;">Join</button>
       <button data-invite-dismiss="${escHtml(code)}"
         style="background:none;border:1px solid var(--bd2);color:var(--dim);padding:8px 10px;font-size:0.78rem;cursor:pointer;font-family:inherit;flex-shrink:0;">✕</button>
@@ -2705,14 +2705,17 @@ function renderGameInvites(invites) {
   `).join('');
 }
 
-async function acceptGameInvite(roomCode) {
-  const name = document.getElementById('playerName').value.trim() || me.name;
+async function acceptGameInvite(roomCode, mode = 'movie') {
+  const name = document.getElementById('playerName').value.trim() || me.name || castMe.name;
   if (!name) { alert('Enter your name first — then tap Join.'); return; }
-  // Remove the invite entry before joining
   if (currentUser && db) {
     await db.ref(`users/${currentUser.uid}/gameInvites/${roomCode}`).remove().catch(() => {});
   }
-  joinRoom(name, roomCode);
+  if (mode === 'cast') {
+    castJoinRoom(name, roomCode);
+  } else {
+    joinRoom(name, roomCode);
+  }
 }
 
 async function dismissGameInvite(roomCode) {
@@ -3171,7 +3174,7 @@ document.body.addEventListener('click', e => {
 
   // Join a game invite (landing page)
   const joinEl = e.target.closest('[data-invite-join]');
-  if (joinEl) { acceptGameInvite(joinEl.dataset.inviteJoin); return; }
+  if (joinEl) { acceptGameInvite(joinEl.dataset.inviteJoin, joinEl.dataset.inviteMode); return; }
 
   // Dismiss a game invite (landing page)
   const dismissEl = e.target.closest('[data-invite-dismiss]');
@@ -3780,6 +3783,56 @@ function castGoLobby() {
   showScreen('screen-cast-lobby');
   document.getElementById('castLobbyCode').textContent = castRoomId;
   document.getElementById('castGameCode').textContent  = castRoomId;
+  renderCastLobbyInvites();
+}
+
+async function renderCastLobbyInvites() {
+  const section = document.getElementById('castLobbyInviteSection');
+  const list    = document.getElementById('castLobbyInviteList');
+  if (!section || !list || !currentUser || !db || !castRoomId) {
+    if (section) section.style.display = 'none';
+    return;
+  }
+  const snap    = await db.ref(`users/${currentUser.uid}/friends`).once('value');
+  const friends = snap.val() ?? {};
+  const entries = Object.entries(friends);
+  if (!entries.length) { section.style.display = 'none'; return; }
+  section.style.display = 'block';
+  list.innerHTML = entries.map(([fuid, f]) => `
+    <div style="display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--bd);">
+      <span style="flex:1;font-size:0.86rem;color:var(--text);">${escHtml(f.name ?? '?')}</span>
+      <button data-cast-invite="${escHtml(fuid)}" data-friend-name="${escHtml(f.name ?? '?')}"
+        style="background:none;border:1px solid var(--bd2);color:var(--dim);font-size:0.52rem;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;cursor:pointer;font-family:inherit;padding:5px 11px;transition:all 0.15s;"
+        onmouseover="this.style.borderColor='var(--ok)';this.style.color='var(--ok)'"
+        onmouseout="if(!this.dataset.sent){this.style.borderColor='var(--bd2)';this.style.color='var(--dim)'}">Invite</button>
+    </div>
+  `).join('');
+
+  list.querySelectorAll('[data-cast-invite]').forEach(btn => {
+    btn.addEventListener('click', () => sendCastGameInvite(btn.dataset.castInvite, btn.dataset.friendName, btn));
+  });
+}
+
+async function sendCastGameInvite(friendUid, friendName, btnEl) {
+  if (!currentUser || !db || !castRoomId) return;
+  if (btnEl) { btnEl.disabled = true; btnEl.textContent = 'Sending…'; }
+  try {
+    const myNameSnap = await db.ref(`users/${currentUser.uid}/gameName`).once('value');
+    const myName = myNameSnap.val() ?? castMe.name ?? 'Someone';
+    await db.ref(`users/${friendUid}/gameInvites/${castRoomId}`).set({
+      fromName: myName, fromUid: currentUser.uid,
+      roomCode: castRoomId, mode: 'cast', sentAt: Date.now()
+    });
+    if (btnEl) {
+      btnEl.dataset.sent      = '1';
+      btnEl.textContent       = '✓ Invited';
+      btnEl.style.color       = 'var(--ok)';
+      btnEl.style.borderColor = 'var(--ok)';
+    }
+  } catch (_) {
+    if (btnEl) { btnEl.disabled = false; btnEl.textContent = 'Invite'; }
+    showToast('Could not send invite — try again', 'err');
+  }
 }
 
 // --- Listener ---
