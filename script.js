@@ -312,48 +312,114 @@ function playDing() {
 const SESSION_KEY = 'tmg_session';
 
 function saveSession() {
-  // Always save locally (works for guests and same-device rejoin)
-  try { localStorage.setItem(SESSION_KEY, JSON.stringify({ id: me.id, name: me.name, roomId })); } catch (_) {}
-  // For signed-in users also mirror to Firebase — enables cross-device continuity
+  // Local storage — guests + same-device convenience
+  try {
+    const all = JSON.parse(localStorage.getItem('sessions') || '{}');
+    all[roomId] = { id: me.id, name: me.name, roomId, mode: 'movie' };
+    localStorage.setItem('sessions', JSON.stringify(all));
+  } catch (_) {}
+  // Cloud — signed-in users, enables cross-device + multi-game
   if (currentUser && db && roomId) {
-    db.ref(`users/${currentUser.uid}/activeSession`).set({
-      roomId,
-      playerId:   me.id,
-      playerName: me.name
+    db.ref(`users/${currentUser.uid}/activeSessions/${roomId}`).set({
+      roomId, playerId: me.id, playerName: me.name, mode: 'movie', ts: Date.now()
     }).catch(() => {});
   }
 }
 
 function clearSession() {
-  try { localStorage.removeItem(SESSION_KEY); } catch (_) {}
-  // Clear cloud session too so the slot doesn't linger on other devices
-  if (currentUser && db) {
-    db.ref(`users/${currentUser.uid}/activeSession`).remove().catch(() => {});
+  try {
+    const all = JSON.parse(localStorage.getItem('sessions') || '{}');
+    delete all[roomId];
+    localStorage.setItem('sessions', JSON.stringify(all));
+  } catch (_) {}
+  if (currentUser && db && roomId) {
+    db.ref(`users/${currentUser.uid}/activeSessions/${roomId}`).remove().catch(() => {});
   }
+}
+
+// Load all active sessions for the current user (cloud + local merged)
+async function loadAllSessions() {
+  const sessions = {};
+  // Cloud sessions
+  if (currentUser && db) {
+    try {
+      const snap = await db.ref(`users/${currentUser.uid}/activeSessions`).once('value');
+      const cloud = snap.val() ?? {};
+      Object.values(cloud).forEach(s => { if (s.roomId) sessions[s.roomId] = s; });
+    } catch (_) {}
+  }
+  // Local sessions (merge, cloud wins)
+  try {
+    const local = JSON.parse(localStorage.getItem('sessions') || '{}');
+    Object.values(local).forEach(s => { if (s.roomId && !sessions[s.roomId]) sessions[s.roomId] = s; });
+  } catch (_) {}
+  return Object.values(sessions);
 }
 
 async function tryRejoin() {
   if (!firebaseReady) return false;
+  const sessions = await loadAllSessions();
+  if (!sessions.length) return false;
 
-  // 1. Cloud session — signed-in users can switch devices and pick up mid-game
-  if (currentUser) {
+  // Verify which sessions are still valid
+  const valid = [];
+  for (const s of sessions) {
+    const dbPath = s.mode === 'cast' ? `castRooms/${s.roomId}` : `rooms/${s.roomId}`;
     try {
-      const snap = await db.ref(`users/${currentUser.uid}/activeSession`).once('value');
-      const cs   = snap.val();
-      if (cs?.roomId && cs?.playerId) {
-        const ok = await restoreSession(cs.roomId, cs.playerId, cs.playerName ?? currentUser.displayName ?? 'Player');
-        if (ok) return true;
-        // Session was stale (room gone / player removed) — wipe it
-        db.ref(`users/${currentUser.uid}/activeSession`).remove().catch(() => {});
+      const snap  = await db.ref(dbPath).once('value');
+      const state = snap.val();
+      if (snap.exists() && state.players?.[s.playerId] && state.status !== 'finished') {
+        valid.push({ ...s, state });
+      } else {
+        // Stale — clean up
+        if (currentUser && db) db.ref(`users/${currentUser.uid}/activeSessions/${s.roomId}`).remove().catch(() => {});
       }
     } catch (_) {}
   }
 
-  // 2. localStorage fallback — guests, or same-device convenience for signed-in users
-  let saved;
-  try { saved = JSON.parse(localStorage.getItem(SESSION_KEY)); } catch (_) { return false; }
-  if (!saved?.id || !saved?.name || !saved?.roomId) return false;
-  return restoreSession(saved.roomId, saved.id, saved.name);
+  if (!valid.length) return false;
+
+  // Show picker for all active sessions (single or multiple)
+  renderActiveGamesPicker(valid);
+  return false;
+}
+
+function renderActiveGamesPicker(sessions) {
+  const el = document.getElementById('activeGamesSection');
+  const list = document.getElementById('activeGamesList');
+  if (!el || !list) return;
+  list.innerHTML = sessions.map(s => {
+    const state   = s.state;
+    const players = state.players ?? {};
+    const others  = Object.entries(players)
+      .filter(([pid]) => pid !== s.playerId)
+      .map(([, p]) => p.name ?? '?').join(', ');
+    const label = s.mode === 'cast' ? 'Cast Game' : 'Movie Game';
+    const statusText = state.status === 'waiting' ? 'In lobby' : 'In progress';
+    return `<div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--bd);">
+      <div style="flex:1;min-width:0;">
+        <div style="font-size:0.78rem;color:var(--text);font-weight:500;">${label} · ${s.roomId}</div>
+        <div style="font-size:0.62rem;color:var(--dim);margin-top:2px;">${statusText}${others ? ` · with ${escHtml(others)}` : ''}</div>
+      </div>
+      <button class="rejoin-btn" data-roomid="${s.roomId}" data-mode="${s.mode ?? 'movie'}"
+        style="background:none;border:1px solid var(--bd2);color:var(--dim);font-size:0.56rem;font-weight:600;letter-spacing:0.12em;text-transform:uppercase;cursor:pointer;font-family:inherit;padding:6px 10px;white-space:nowrap;"
+        onmouseover="this.style.borderColor='var(--ok)';this.style.color='var(--ok)'"
+        onmouseout="this.style.borderColor='var(--bd2)';this.style.color='var(--dim)'">Rejoin</button>
+    </div>`;
+  }).join('');
+
+  list.querySelectorAll('.rejoin-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const rId  = btn.dataset.roomid;
+      const mode = btn.dataset.mode;
+      const s    = sessions.find(x => x.roomId === rId);
+      if (!s) return;
+      if (mode === 'cast') await castRestoreSession(s.roomId, s.playerId, s.playerName);
+      else                 await restoreSession(s.roomId, s.playerId, s.playerName);
+    });
+  });
+
+  el.style.display = 'block';
 }
 
 // Shared rejoin logic — verifies the room + player still exist, then restores state
@@ -877,7 +943,7 @@ async function validateChallengeAnswer(input, challenge, preSelected = null, use
 //  Room creation & joining
 // ============================================================
 async function createRoom(name) {
-  me.id  = currentUser ? currentUser.uid : uid();
+  me.id  = uid();  // always a fresh session ID — accountId stored separately
   me.name = name;
   roomId = genRoomCode();
   isHost = true;
@@ -892,7 +958,7 @@ async function createRoom(name) {
     currentIdx: 0, currentAttempts: 0,
     lastChainItem: null,
     usedMovies: {}, usedActors: {},
-    players: { [me.id]: { name, letters: '', order: 0, out: false } },
+    players: { [me.id]: { name, letters: '', order: 0, out: false, accountId: currentUser?.uid ?? null } },
     playerOrder: [me.id],
     winner: null, log: {}, fullLog: {},
     pendingChallenge: null, challenge: null,
@@ -919,7 +985,7 @@ async function joinRoom(name, code) {
   const order = toArray(state.playerOrder);
   if (order.length >= 4) { alert('That room is full (4 players max).'); return; }
 
-  me.id  = currentUser ? currentUser.uid : uid();
+  me.id  = uid();  // always a fresh session ID
   me.name = name;
   roomId = code;
   isHost = false;
@@ -927,7 +993,7 @@ async function joinRoom(name, code) {
   roomRef = db.ref(`rooms/${roomId}`);
 
   await roomRef.update({
-    [`players/${me.id}`]: { name, letters: '', order: order.length, out: false },
+    [`players/${me.id}`]: { name, letters: '', order: order.length, out: false, accountId: currentUser?.uid ?? null },
     playerOrder: [...order, me.id]
   });
 
@@ -1998,7 +2064,7 @@ async function writeGameHistory(didWin, players, winnerId) {
       .map(([, e]) => ({ name: e.name ?? '?', type: e.type ?? 'movie' }));
 
     const opponents = Object.entries(players)
-      .filter(([pid]) => pid !== currentUser.uid)
+      .filter(([pid]) => pid !== me.id)
       .map(([, p]) => p.name ?? '?');
 
     const record = {
@@ -3608,7 +3674,7 @@ async function searchCastMember(query, tmdbId, mediaType) {
 
 // --- Room creation/join ---
 async function castCreateRoom(name) {
-  castMe.id   = currentUser ? currentUser.uid : uid();
+  castMe.id   = uid();
   castMe.name = name;
   castRoomId  = genRoomCode();
   castIsHost  = true;
@@ -3623,12 +3689,13 @@ async function castCreateRoom(name) {
     subject:     null,
     usedActors:  {},
     namedList:   [],
-    players:     { [castMe.id]: { name, order: 0, out: false, elimOrder: 0 } },
+    players:     { [castMe.id]: { name, order: 0, out: false, elimOrder: 0, accountId: currentUser?.uid ?? null } },
     playerOrder: [castMe.id],
     winner:      null,
   });
 
   castRoomRef.onDisconnect().update({ [`players/${castMe.id}/connected`]: false });
+  castSaveSession();
   castAttachListener();
   castGoLobby();
 }
@@ -3643,7 +3710,7 @@ async function castJoinRoom(name, code) {
   const order = toArray(state.playerOrder);
   if (order.length >= 8) { alert('That room is full.'); return; }
 
-  castMe.id   = currentUser ? currentUser.uid : uid();
+  castMe.id   = uid();
   castMe.name = name;
   castRoomId  = code;
   castIsHost  = false;
@@ -3651,13 +3718,62 @@ async function castJoinRoom(name, code) {
   castRoomRef = db.ref(`castRooms/${castRoomId}`);
 
   await castRoomRef.update({
-    [`players/${castMe.id}`]: { name, order: order.length, out: false, elimOrder: 0 },
+    [`players/${castMe.id}`]: { name, order: order.length, out: false, elimOrder: 0, accountId: currentUser?.uid ?? null },
     playerOrder: [...order, castMe.id],
   });
 
   castRoomRef.onDisconnect().update({ [`players/${castMe.id}/connected`]: false });
+  castSaveSession();
   castAttachListener();
   castGoLobby();
+}
+
+function castSaveSession() {
+  try {
+    const all = JSON.parse(localStorage.getItem('sessions') || '{}');
+    all[castRoomId] = { id: castMe.id, name: castMe.name, roomId: castRoomId, mode: 'cast' };
+    localStorage.setItem('sessions', JSON.stringify(all));
+  } catch (_) {}
+  if (currentUser && db && castRoomId) {
+    db.ref(`users/${currentUser.uid}/activeSessions/${castRoomId}`).set({
+      roomId: castRoomId, playerId: castMe.id, playerName: castMe.name, mode: 'cast', ts: Date.now()
+    }).catch(() => {});
+  }
+}
+
+function castClearSession() {
+  try {
+    const all = JSON.parse(localStorage.getItem('sessions') || '{}');
+    delete all[castRoomId];
+    localStorage.setItem('sessions', JSON.stringify(all));
+  } catch (_) {}
+  if (currentUser && db && castRoomId) {
+    db.ref(`users/${currentUser.uid}/activeSessions/${castRoomId}`).remove().catch(() => {});
+  }
+}
+
+async function castRestoreSession(rId, pId, pName) {
+  try {
+    const snap  = await db.ref(`castRooms/${rId}`).once('value');
+    if (!snap.exists()) return false;
+    const state = snap.val();
+    if (!state.players?.[pId]) return false;
+
+    castMe.id   = pId;
+    castMe.name = pName;
+    castRoomId  = rId;
+    castIsHost  = state.hostId === pId;
+    if (state.status === 'finished') castStatsWritten = true;
+    castRoomRef = db.ref(`castRooms/${rId}`);
+    document.getElementById('castLobbyCode').textContent = rId;
+    document.getElementById('castGameCode').textContent  = rId;
+    castRoomRef.onDisconnect().update({ [`players/${castMe.id}/connected`]: false });
+    castAttachListener();
+    return true;
+  } catch (e) {
+    console.error('Cast rejoin failed:', e);
+    return false;
+  }
 }
 
 function castGoLobby() {
@@ -3951,7 +4067,7 @@ async function writeCastGameHistory(players, winnerId) {
   if (!currentUser || !db || !castRoomSnap) return;
   try {
     const opponents = Object.entries(players)
-      .filter(([pid]) => pid !== currentUser.uid)
+      .filter(([pid]) => pid !== castMe.id)
       .map(([, p]) => p.name ?? '?');
     await db.ref(`users/${currentUser.uid}/gameHistory`).push({
       ts:        Date.now(),
@@ -4059,6 +4175,7 @@ document.getElementById('castJoinBtn').addEventListener('click', async () => {
 document.getElementById('castStartBtn').addEventListener('click', castStartGame);
 
 document.getElementById('castLeaveLobbyBtn').addEventListener('click', () => {
+  castClearSession();
   if (castRoomRef) castRoomRef.off('value', castListener);
   castRoomRef = null; castRoomSnap = null; castRoomId = null;
   showScreen('screen-cast-landing');
