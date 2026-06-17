@@ -414,8 +414,23 @@ function renderActiveGamesPicker(sessions) {
       const mode = btn.dataset.mode;
       const s    = sessions.find(x => x.roomId === rId);
       if (!s) return;
-      if (mode === 'cast') await castRestoreSession(s.roomId, s.playerId, s.playerName);
-      else                 await restoreSession(s.roomId, s.playerId, s.playerName);
+      btn.textContent = 'Rejoining…';
+      btn.disabled = true;
+      const ok = mode === 'cast'
+        ? await castRestoreSession(s.roomId, s.playerId, s.playerName)
+        : await restoreSession(s.roomId, s.playerId, s.playerName);
+      if (!ok) {
+        // Stale session — remove it and hide the entry
+        if (currentUser && db) db.ref(`users/${currentUser.uid}/activeSessions/${rId}`).remove().catch(() => {});
+        try {
+          const all = JSON.parse(localStorage.getItem('sessions') || '{}');
+          delete all[rId];
+          localStorage.setItem('sessions', JSON.stringify(all));
+        } catch (_) {}
+        btn.closest('div[style]').remove();
+        if (!list.children.length) el.style.display = 'none';
+        showToast('That game is no longer available', 'err');
+      }
     });
   });
 
