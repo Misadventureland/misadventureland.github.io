@@ -326,15 +326,26 @@ function saveSession() {
   }
 }
 
-function clearSession() {
+function clearSession(rId) {
+  const id = rId ?? roomId;
+  if (!id) return;
   try {
     const all = JSON.parse(localStorage.getItem('sessions') || '{}');
-    delete all[roomId];
+    delete all[id];
     localStorage.setItem('sessions', JSON.stringify(all));
   } catch (_) {}
-  if (currentUser && db && roomId) {
-    db.ref(`users/${currentUser.uid}/activeSessions/${roomId}`).remove().catch(() => {});
+  if (currentUser && db) {
+    db.ref(`users/${currentUser.uid}/activeSessions/${id}`).remove().catch(() => {});
   }
+}
+
+// Normalize a session object to always have playerId/playerName fields
+function normalizeSession(s) {
+  return {
+    ...s,
+    playerId:   s.playerId   ?? s.id   ?? null,
+    playerName: s.playerName ?? s.name ?? null,
+  };
 }
 
 // Load all active sessions for the current user (cloud + local merged)
@@ -345,13 +356,13 @@ async function loadAllSessions() {
     try {
       const snap = await db.ref(`users/${currentUser.uid}/activeSessions`).once('value');
       const cloud = snap.val() ?? {};
-      Object.values(cloud).forEach(s => { if (s.roomId) sessions[s.roomId] = s; });
+      Object.values(cloud).forEach(s => { if (s.roomId) sessions[s.roomId] = normalizeSession(s); });
     } catch (_) {}
   }
   // Local sessions (merge, cloud wins)
   try {
     const local = JSON.parse(localStorage.getItem('sessions') || '{}');
-    Object.values(local).forEach(s => { if (s.roomId && !sessions[s.roomId]) sessions[s.roomId] = s; });
+    Object.values(local).forEach(s => { if (s.roomId && !sessions[s.roomId]) sessions[s.roomId] = normalizeSession(s); });
   } catch (_) {}
   return Object.values(sessions);
 }
@@ -446,9 +457,9 @@ function renderActiveGamesPicker(sessions) {
 async function restoreSession(rId, pId, pName) {
   try {
     const snap = await db.ref(`rooms/${rId}`).once('value');
-    if (!snap.exists()) { clearSession(); return false; }
+    if (!snap.exists()) { clearSession(rId); return false; }
     const state = snap.val();
-    if (!state.players?.[pId]) { clearSession(); return false; }
+    if (!pId || !state.players?.[pId]) { clearSession(rId); return false; }
 
     me.id   = pId;
     me.name = pName;
@@ -462,10 +473,15 @@ async function restoreSession(rId, pId, pName) {
 
     roomRef.onDisconnect().update({ [`players/${me.id}/connected`]: false });
     attachListener();
+    // Navigate immediately using the already-fetched state (don't wait for listener callback)
+    roomSnap = state;
+    if (state.status === 'waiting')  { showScreen('screen-lobby');    renderLobby(); }
+    if (state.status === 'playing')  { showScreen('screen-game');     renderGame(); }
+    if (state.status === 'finished') { renderGameOver(); showScreen('screen-gameover'); }
     return true;
   } catch (e) {
     console.error('Rejoin failed:', e);
-    clearSession();
+    clearSession(rId);
     return false;
   }
 }
@@ -3783,23 +3799,25 @@ function castSaveSession() {
   }
 }
 
-function castClearSession() {
+function castClearSession(rId) {
+  const id = rId ?? castRoomId;
+  if (!id) return;
   try {
     const all = JSON.parse(localStorage.getItem('sessions') || '{}');
-    delete all[castRoomId];
+    delete all[id];
     localStorage.setItem('sessions', JSON.stringify(all));
   } catch (_) {}
-  if (currentUser && db && castRoomId) {
-    db.ref(`users/${currentUser.uid}/activeSessions/${castRoomId}`).remove().catch(() => {});
+  if (currentUser && db) {
+    db.ref(`users/${currentUser.uid}/activeSessions/${id}`).remove().catch(() => {});
   }
 }
 
 async function castRestoreSession(rId, pId, pName) {
   try {
     const snap  = await db.ref(`castRooms/${rId}`).once('value');
-    if (!snap.exists()) return false;
+    if (!snap.exists()) { castClearSession(rId); return false; }
     const state = snap.val();
-    if (!state.players?.[pId]) return false;
+    if (!pId || !state.players?.[pId]) { castClearSession(rId); return false; }
 
     castMe.id   = pId;
     castMe.name = pName;
@@ -3811,9 +3829,15 @@ async function castRestoreSession(rId, pId, pName) {
     document.getElementById('castGameCode').textContent  = rId;
     castRoomRef.onDisconnect().update({ [`players/${castMe.id}/connected`]: false });
     castAttachListener();
+    // Navigate immediately using the already-fetched state
+    castRoomSnap = state;
+    if (state.status === 'waiting')  { showScreen('screen-cast-lobby');    castGoLobby(); }
+    if (state.status === 'playing')  { showScreen('screen-cast-game');     castRenderGame(); }
+    if (state.status === 'finished') { castRenderGameOver(); showScreen('screen-cast-gameover'); }
     return true;
   } catch (e) {
     console.error('Cast rejoin failed:', e);
+    castClearSession(rId);
     return false;
   }
 }
