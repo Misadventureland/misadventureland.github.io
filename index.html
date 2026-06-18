@@ -764,15 +764,23 @@
     </div>
     <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;">
       <div class="room-tag">Room: <span id="castGameCode"></span></div>
-      <button id="castLeaveBtn" style="background:none;border:none;color:var(--dim);font-size:0.62rem;letter-spacing:0.14em;cursor:pointer;font-family:inherit;text-transform:uppercase;padding:0;font-weight:500;" onmouseover="this.style.color='#c0182b'" onmouseout="this.style.color='var(--dim)'">Leave</button>
+      <div style="display:flex;gap:14px;align-items:center;">
+        <button id="castHomeBtn" style="background:none;border:none;color:var(--dim);font-size:0.62rem;letter-spacing:0.14em;cursor:pointer;font-family:inherit;text-transform:uppercase;padding:0;font-weight:500;" onmouseover="this.style.color='var(--text)'" onmouseout="this.style.color='var(--dim)'">Home</button>
+        <button id="castLeaveBtn" style="background:none;border:none;color:var(--dim);font-size:0.62rem;letter-spacing:0.14em;cursor:pointer;font-family:inherit;text-transform:uppercase;padding:0;font-weight:500;" onmouseover="this.style.color='#c0182b'" onmouseout="this.style.color='var(--dim)'">Leave</button>
+      </div>
     </div>
   </div>
 
   <!-- Subject card -->
-  <div class="card" style="text-align:center;margin-bottom:10px;">
-    <div style="font-size:0.52rem;font-weight:600;letter-spacing:0.26em;text-transform:uppercase;color:var(--dim);margin-bottom:6px;" id="castSubjectLabel">Naming cast of</div>
-    <div style="font-size:1.2rem;font-weight:700;color:var(--text);" id="castSubjectTitle">—</div>
-    <div style="font-size:0.65rem;color:var(--dim);margin-top:3px;" id="castSubjectYear"></div>
+  <div class="card" style="margin-bottom:10px;">
+    <div style="display:flex;align-items:center;gap:14px;">
+      <img id="castSubjectPoster" src="" alt="" style="display:none;width:56px;height:84px;object-fit:cover;border-radius:3px;flex-shrink:0;">
+      <div>
+        <div style="font-size:0.52rem;font-weight:600;letter-spacing:0.26em;text-transform:uppercase;color:var(--dim);margin-bottom:4px;" id="castSubjectLabel">Naming cast of</div>
+        <div style="font-size:1.1rem;font-weight:700;color:var(--text);line-height:1.2;" id="castSubjectTitle">—</div>
+        <div style="font-size:0.65rem;color:var(--dim);margin-top:3px;" id="castSubjectYear"></div>
+      </div>
+    </div>
   </div>
 
   <!-- Players status -->
@@ -794,7 +802,9 @@
       </div>
       <p id="castFeedback" style="font-size:0.78rem;min-height:20px;margin-top:8px;letter-spacing:0.03em;"></p>
       <button class="btn btn-gold" id="castSubmitBtn" style="margin-top:8px;">Submit</button>
-      <button id="castPassBtn" style="margin-top:8px;width:100%;background:none;border:1px solid var(--bd2);color:var(--dim);font-size:0.62rem;font-weight:600;letter-spacing:0.14em;text-transform:uppercase;cursor:pointer;font-family:inherit;padding:10px;" onmouseover="this.style.borderColor='var(--red)';this.style.color='var(--red)'" onmouseout="this.style.borderColor='var(--bd2)';this.style.color='var(--dim)'">Can't name one — I'm out</button>
+      <div style="text-align:center;margin-top:10px;">
+        <button id="castPassBtn" style="background:none;border:none;color:var(--dim);font-size:0.62rem;font-weight:500;letter-spacing:0.14em;cursor:pointer;font-family:inherit;text-transform:uppercase;padding:4px 8px;transition:color 0.2s;" onmouseover="this.style.color='#c0182b'" onmouseout="this.style.color='var(--dim)'">Can't name one — I'm out</button>
+      </div>
     </div>
   </div>
 
@@ -802,6 +812,16 @@
   <div id="castWaitArea" style="display:none;">
     <div class="card" style="text-align:center;padding:24px;">
       <p style="font-size:0.82rem;color:var(--dim);margin:0;" id="castWaitMsg">Waiting for other players…</p>
+    </div>
+  </div>
+
+  <!-- Chat -->
+  <div class="chat-section" style="margin-top:10px;">
+    <div class="chat-label">Chat</div>
+    <div class="chat-messages" id="castChatMessages"></div>
+    <div class="chat-input-row">
+      <input type="text" id="castChatInput" placeholder="Say something…" maxlength="120" autocomplete="off">
+      <button class="btn btn-outline chat-send-btn" id="castChatSendBtn">Send</button>
     </div>
   </div>
 
@@ -895,6 +915,7 @@
     <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;">
       <div class="room-tag">Room: <span id="gameCode"></span></div>
       <div style="display:flex;gap:14px;align-items:center;">
+        <button id="movieHomeBtn" style="background:none;border:none;color:var(--dim);font-size:0.62rem;letter-spacing:0.14em;cursor:pointer;font-family:inherit;text-transform:uppercase;padding:0;font-weight:500;" onmouseover="this.style.color='var(--text)'" onmouseout="this.style.color='var(--dim)'">Home</button>
         <button id="inGameStatsBtn" style="background:none;border:none;color:var(--dim);font-size:0.62rem;letter-spacing:0.14em;cursor:pointer;font-family:inherit;text-transform:uppercase;padding:0;font-weight:500;" onmouseover="this.style.color='var(--text)'" onmouseout="this.style.color='var(--dim)'">Stats</button>
         <button id="leaveBtn" style="background:none;border:none;color:var(--dim);font-size:0.62rem;letter-spacing:0.14em;cursor:pointer;font-family:inherit;text-transform:uppercase;padding:0;font-weight:500;" onmouseover="this.style.color='#c0182b'" onmouseout="this.style.color='var(--dim)'">Leave</button>
       </div>
@@ -1420,6 +1441,52 @@
     <p style="font-size:0.78rem;color:var(--dim);text-align:center;margin-top:36px;font-style:italic;">Good luck. Have fun. Don't die.</p>
 
     <button id="rulesGotItBtn" style="margin-top:24px;width:100%;padding:14px;background:none;border:1px solid var(--bd2);color:var(--text);font-size:0.65rem;font-weight:600;letter-spacing:0.16em;text-transform:uppercase;cursor:pointer;font-family:inherit;transition:border-color 0.15s,color 0.15s;" onmouseover="this.style.borderColor='var(--text)'" onmouseout="this.style.borderColor='var(--bd2)'">Got it — let's play</button>
+  </div>
+</div>
+
+<!-- Cast Game Rules modal -->
+<div id="castRulesModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.95);z-index:2000;overflow-y:auto;-webkit-overflow-scrolling:touch;">
+  <div style="max-width:520px;margin:0 auto;padding:40px 28px 80px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:28px;padding-bottom:16px;border-bottom:1px solid var(--bd);">
+      <span style="font-size:0.6rem;font-weight:600;letter-spacing:0.22em;text-transform:uppercase;color:var(--dim);">How to Play</span>
+      <button id="castRulesCloseBtn" style="background:none;border:none;color:var(--dim);font-size:1.4rem;cursor:pointer;padding:0;line-height:1;font-family:inherit;" onmouseover="this.style.color='var(--text)'" onmouseout="this.style.color='var(--dim)'">×</button>
+    </div>
+
+    <h2 style="font-size:1.3rem;font-weight:700;color:var(--text);margin:0 0 6px;">The Cast Game</h2>
+    <p style="font-size:0.82rem;color:var(--dim);margin:0 0 28px;font-style:italic;">One movie. All the actors. Good luck.</p>
+
+    <div style="display:flex;flex-direction:column;gap:22px;">
+
+      <div>
+        <div style="font-size:0.58rem;font-weight:700;letter-spacing:0.2em;text-transform:uppercase;color:#c9a84c;margin-bottom:8px;">The Setup</div>
+        <p style="font-size:0.88rem;color:var(--text);line-height:1.7;margin:0;">One player picks a movie or TV show. Everyone else takes turns naming actors from that production's cast.</p>
+      </div>
+
+      <div>
+        <div style="font-size:0.58rem;font-weight:700;letter-spacing:0.2em;text-transform:uppercase;color:#c0182b;margin-bottom:8px;">Elimination</div>
+        <p style="font-size:0.88rem;color:var(--text);line-height:1.7;margin:0;">If it's your turn and you can't name someone from the cast, you're out. No letters — one strike and you're done.</p>
+      </div>
+
+      <div>
+        <div style="font-size:0.58rem;font-weight:700;letter-spacing:0.2em;text-transform:uppercase;color:#c9a84c;margin-bottom:8px;">No Repeats</div>
+        <p style="font-size:0.88rem;color:var(--text);line-height:1.7;margin:0;">Each actor can only be named once. Once they're on the list, they're gone.</p>
+      </div>
+
+      <div>
+        <div style="font-size:0.58rem;font-weight:700;letter-spacing:0.2em;text-transform:uppercase;color:#c9a84c;margin-bottom:8px;">Who Picks?</div>
+        <p style="font-size:0.88rem;color:var(--text);line-height:1.7;margin:0;">The picker rotates each round — everyone gets a turn choosing the subject.</p>
+      </div>
+
+      <div>
+        <div style="font-size:0.58rem;font-weight:700;letter-spacing:0.2em;text-transform:uppercase;color:#c9a84c;margin-bottom:8px;">Winning</div>
+        <p style="font-size:0.88rem;color:var(--text);line-height:1.7;margin:0;">Last player standing wins the round. Be the one who can always think of one more name.</p>
+      </div>
+
+    </div>
+
+    <p style="font-size:0.78rem;color:var(--dim);text-align:center;margin-top:36px;font-style:italic;">Know the cast. Outlast the others.</p>
+
+    <button id="castRulesGotItBtn" style="margin-top:24px;width:100%;padding:14px;background:none;border:1px solid var(--bd2);color:var(--text);font-size:0.65rem;font-weight:600;letter-spacing:0.16em;text-transform:uppercase;cursor:pointer;font-family:inherit;transition:border-color 0.15s,color 0.15s;" onmouseover="this.style.borderColor='var(--text)'" onmouseout="this.style.borderColor='var(--bd2)'">Got it — let's play</button>
   </div>
 </div>
 

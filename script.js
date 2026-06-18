@@ -2727,14 +2727,22 @@ function renderGameInvites(invites) {
 }
 
 async function acceptGameInvite(roomCode, mode = 'movie') {
-  const name = document.getElementById('playerName').value.trim() || me.name || castMe.name;
-  if (!name) { alert('Enter your name first — then tap Join.'); return; }
   if (currentUser && db) {
     await db.ref(`users/${currentUser.uid}/gameInvites/${roomCode}`).remove().catch(() => {});
   }
   if (mode === 'cast') {
+    const name = castMe.name || me.name || document.getElementById('castPlayerName').value.trim() || document.getElementById('playerName').value.trim();
+    if (!name) {
+      // Navigate to cast landing so user can enter name, pre-fill code
+      showScreen('screen-cast-landing');
+      const codeEl = document.getElementById('castJoinCode');
+      if (codeEl) codeEl.value = roomCode;
+      return;
+    }
     castJoinRoom(name, roomCode);
   } else {
+    const name = me.name || castMe.name || document.getElementById('playerName').value.trim();
+    if (!name) { alert('Enter your name first — then tap Join.'); return; }
     joinRoom(name, roomCode);
   }
 }
@@ -3599,10 +3607,14 @@ function startQuoteRotation() {
 //  Rules modal
 // ============================================================
 function openRules() {
-  document.getElementById('rulesModal').style.display = 'block';
+  const cur = document.querySelector('.screen.active')?.id ?? '';
+  const isCastScreen = cur.startsWith('screen-cast');
+  document.getElementById('rulesModal').style.display     = isCastScreen ? 'none' : 'block';
+  document.getElementById('castRulesModal').style.display = isCastScreen ? 'block' : 'none';
 }
 function closeRules() {
-  document.getElementById('rulesModal').style.display = 'none';
+  document.getElementById('rulesModal').style.display     = 'none';
+  document.getElementById('castRulesModal').style.display = 'none';
 }
 document.getElementById('rulesBtn').addEventListener('click', openRules);
 document.getElementById('rulesCloseBtn').addEventListener('click', closeRules);
@@ -3611,6 +3623,11 @@ document.getElementById('rulesGotItBtn').addEventListener('click', () => {
   closeRules();
 });
 document.getElementById('rulesModal').addEventListener('click', function (e) {
+  if (e.target === this) closeRules();
+});
+document.getElementById('castRulesCloseBtn').addEventListener('click', closeRules);
+document.getElementById('castRulesGotItBtn').addEventListener('click', closeRules);
+document.getElementById('castRulesModal').addEventListener('click', function (e) {
   if (e.target === this) closeRules();
 });
 
@@ -3865,6 +3882,7 @@ function castAttachListener() {
     castRoomSnap = snap.val();
     onCastRoomChange();
   });
+  attachCastChatListener();
 }
 
 function onCastRoomChange() {
@@ -3926,10 +3944,20 @@ function castRenderGame() {
   const isMyTurn   = curPid === castMe.id;
   const amPicker   = pickerPid === castMe.id;
 
-  // Subject header
+  // Subject header + poster
   document.getElementById('castSubjectTitle').textContent = subject?.title ?? '—';
   document.getElementById('castSubjectYear').textContent  = subject?.year  ?? '';
   document.getElementById('castSubjectLabel').textContent = subject ? 'Naming cast of' : 'Waiting for subject…';
+  const posterEl = document.getElementById('castSubjectPoster');
+  if (posterEl) {
+    const posterSrc = subject?.imagePath ? tmdbImg(subject.imagePath) : null;
+    if (posterSrc) {
+      posterEl.src = posterSrc;
+      posterEl.style.display = 'block';
+    } else {
+      posterEl.style.display = 'none';
+    }
+  }
 
   // Turn label
   document.getElementById('castTurnLabel').textContent = subject ? 'Now naming' : 'Picking subject';
@@ -3954,7 +3982,15 @@ function castRenderGame() {
   const named = castRoomSnap.namedList ?? [];
   document.getElementById('castNamedCount').textContent = named.length;
   document.getElementById('castNamedList').innerHTML = named.length
-    ? named.map(a => `<div class="chain-log-item"><span class="icon">⭐</span><span>${escHtml(a.name)}</span></div>`).join('')
+    ? named.map(a => {
+        const img = a.imagePath ? tmdbImg(a.imagePath) : null;
+        return `<div class="chain-log-item">
+          ${img
+            ? `<img class="suggestion-thumb round" src="${img}" alt="" loading="lazy" style="width:28px;height:28px;flex-shrink:0;">`
+            : `<span class="icon">⭐</span>`}
+          <span>${escHtml(a.name)}</span>
+        </div>`;
+      }).join('')
     : '<p style="color:var(--dim);font-size:0.82rem;padding:8px 0;">None yet — be first!</p>';
 
   // Show correct panel
@@ -4032,7 +4068,7 @@ async function castSubmitActor() {
   const players    = castRoomSnap.players ?? {};
   const activePids = order.filter(p => !players[p]?.out);
   const nextIdx    = (castRoomSnap.currentIdx + 1) % activePids.length;
-  const namedList  = [...(castRoomSnap.namedList ?? []), { id: castPickedActor.id, name: castPickedActor.name }];
+  const namedList  = [...(castRoomSnap.namedList ?? []), { id: castPickedActor.id, name: castPickedActor.name, imagePath: castPickedActor.imagePath ?? null }];
 
   await castRoomRef.update({
     [`usedActors/${castPickedActor.id}`]: true,
@@ -4191,25 +4227,31 @@ document.getElementById('castPickInput').addEventListener('input', function () {
   }, 220);
 });
 
-// --- Autocomplete for actor input ---
+// --- Autocomplete for actor input (uses /search/person, validates against cast at submit) ---
 let castPickedActor  = null;
 let castActorDebounce = null;
 document.getElementById('castInput').addEventListener('input', function () {
   clearTimeout(castActorDebounce);
   castPickedActor = null;
   const q = this.value.trim();
-  if (!q || !castRoomSnap?.subject) { clearSuggestionsEl('castSuggestions'); return; }
+  if (!q) { clearSuggestionsEl('castSuggestions'); return; }
   castActorDebounce = setTimeout(async () => {
-    const { tmdbId, mediaType } = castRoomSnap.subject;
-    const results = await searchCastMember(q, tmdbId, mediaType);
+    const data = await tmdbFetch('/search/person', { query: q, language: 'en-US' });
+    const all  = data.results ?? [];
+    const results = all.slice(0, 6).map(p => ({
+      id: p.id, name: p.name, imagePath: p.profile_path ?? null,
+    }));
     const el = document.getElementById('castSuggestions');
     if (!el) return;
     if (!results.length) { clearSuggestionsEl('castSuggestions'); return; }
-    const used = castRoomSnap.usedActors ?? {};
+    const used = castRoomSnap?.usedActors ?? {};
     el.innerHTML = results.map((r, i) => {
       const isUsed = used[r.id];
+      const img = r.imagePath ? tmdbImg(r.imagePath) : null;
       return `<div class="suggestion-item" data-i="${i}" style="${isUsed ? 'opacity:0.35;pointer-events:none;' : ''}">
-        <div class="suggestion-thumb round"></div>
+        ${img
+          ? `<img class="suggestion-thumb round" src="${img}" alt="" loading="lazy">`
+          : `<div class="suggestion-thumb round"></div>`}
         <div style="flex:1;min-width:0;">
           <div class="suggestion-title">${escHtml(r.name)}${isUsed ? ' <span style="font-size:0.6rem;color:var(--dim);">already named</span>' : ''}</div>
         </div>
@@ -4226,6 +4268,42 @@ document.getElementById('castInput').addEventListener('input', function () {
     el.classList.add('open');
   }, 220);
 });
+
+// --- Home button wiring ---
+document.getElementById('castHomeBtn').addEventListener('click', () => showScreen('screen-landing'));
+document.getElementById('movieHomeBtn').addEventListener('click', () => showScreen('screen-landing'));
+
+// --- Cast chat ---
+(function () {
+  function sendCastChat() {
+    const input = document.getElementById('castChatInput');
+    const msg   = input.value.trim();
+    if (!msg || !castRoomRef || !castMe.id) return;
+    castRoomRef.child('chat').push({
+      pid:  castMe.id,
+      name: castMe.name,
+      text: msg,
+      ts:   Date.now(),
+    });
+    input.value = '';
+  }
+  document.getElementById('castChatSendBtn').addEventListener('click', sendCastChat);
+  document.getElementById('castChatInput').addEventListener('keydown', e => { if (e.key === 'Enter') sendCastChat(); });
+})();
+
+function attachCastChatListener() {
+  if (!castRoomRef) return;
+  castRoomRef.child('chat').on('child_added', snap => {
+    const { name, text } = snap.val();
+    const el    = document.getElementById('castChatMessages');
+    if (!el) return;
+    const div   = document.createElement('div');
+    div.className = 'chat-msg';
+    div.innerHTML = `<span class="chat-name">${escHtml(name)}</span><span class="chat-text">${escHtml(text)}</span>`;
+    el.appendChild(div);
+    el.scrollTop = el.scrollHeight;
+  });
+}
 
 // --- Button wiring ---
 document.getElementById('castGameBtn').addEventListener('click', () => showScreen('screen-cast-landing'));
